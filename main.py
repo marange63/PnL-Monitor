@@ -9,7 +9,7 @@ if __name__ == '__main__':
         try:
             data = yf.Ticker(ticker).fast_info
             last_price = data.last_price
-            last_close = data.previous_close
+            last_close = data.regular_market_previous_close
             pct_move = (last_price - last_close) / last_close
             return last_price, last_close, pct_move
         except Exception:

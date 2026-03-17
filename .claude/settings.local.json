@@ -5,7 +5,8 @@
       "Bash(C:/Users/wamfo/anaconda3/envs/PnL-Monitor/python.exe -c \"import claudedev_shared\" 2>&1)",
       "Bash(conda run:*)",
       "Bash(\"C:\\\\Users\\\\wamfo\\\\anaconda3\\\\envs\\\\PnL-Monitor\\\\python.exe\" main.py)",
-      "Bash(\"C:\\\\Users\\\\wamfo\\\\anaconda3\\\\envs\\\\PnL-Monitor\\\\python.exe\" -c \":*)"
+      "Bash(\"C:\\\\Users\\\\wamfo\\\\anaconda3\\\\envs\\\\PnL-Monitor\\\\python.exe\" -c \":*)",
+      "Bash(\"C:\\\\Users\\\\wamfo\\\\anaconda3\\\\envs\\\\PnL-Monitor\\\\python.exe\" -c \"\nimport yfinance as yf\nt = yf.Ticker\\('AMZN'\\)\nfi = t.fast_info\nprint\\('previous_close:', fi.previous_close\\)\nprint\\('regular_market_previous_close:', fi.regular_market_previous_close\\)\nhist = t.history\\(period='5d'\\)\nprint\\(hist[['Close']].tail\\(3\\)\\)\n\")"
     ]
   }
 }
