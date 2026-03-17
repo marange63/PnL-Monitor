@@ -1,9 +1,11 @@
-from claudedev_shared import ubs_live_price_holdings
+from claudedev_shared import ubs_live_price_holdings, ubs_401k_holdings
 import yfinance as yf
 import pandas as pd
 
 if __name__ == '__main__':
     df = ubs_live_price_holdings()
+    df2 = ubs_401k_holdings()
+    df = pd.concat([df, df2], ignore_index=True)
 
     def get_price_data(ticker):
         try:

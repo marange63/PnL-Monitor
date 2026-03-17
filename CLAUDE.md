@@ -1,7 +1,7 @@
 # PnL-Monitor
 
 ## Project Overview
-Daily portfolio PnL monitor for a UBS brokerage account. Pulls live holdings from an internal shared library, enriches them with real-time price data from Yahoo Finance, and computes intraday P&L per position and in aggregate.
+Daily portfolio PnL monitor covering a UBS brokerage account and a UBS 401k account. Pulls live holdings from an internal shared library, enriches them with real-time price data from Yahoo Finance, and computes intraday P&L per position and in aggregate.
 
 ## Repository
 - GitHub: https://github.com/marange63/PnL-Monitor
@@ -15,7 +15,7 @@ Daily portfolio PnL monitor for a UBS brokerage account. Pulls live holdings fro
 Always run Python via the PnL-Monitor conda environment, not the system Python.
 
 ## Key Dependencies
-- `claudedev_shared` — internal shared library providing `ubs_live_price_holdings()`
+- `claudedev_shared` — internal shared library providing `ubs_live_price_holdings()` and `ubs_401k_holdings()`
 - `yfinance` — Yahoo Finance price data
 - `pandas`
 
@@ -26,6 +26,10 @@ Returns a DataFrame with columns:
 - `SYMBOL` — brokerage symbol
 - `SOD VALUE` — start-of-day position value in USD
 - `Ticker Alias` — Yahoo Finance-compatible ticker symbol
+
+### `ubs_401k_holdings()` (from `claudedev_shared`)
+Returns a DataFrame with the same schema as `ubs_live_price_holdings()`.
+Source file: `C:\Users\wamfo\ClaudeDev\data\UBS 401K.csv` with ticker aliases from `Ticker-Aliases-401K.csv`.
 
 ### yfinance (`fast_info`)
 Used fields:
