@@ -1,0 +1,11 @@
+name: PnL-Monitor
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.13
+  - pip
+  - pip:
+    - yfinance>=1.2.0
+    - pandas>=2.3.0
+    - claudedev_shared

@@ -16,8 +16,12 @@ Always run Python via the PnL-Monitor conda environment, not the system Python.
 
 ## Key Dependencies
 - `claudedev_shared` — internal shared library providing `ubs_live_price_holdings()` and `ubs_401k_holdings()`
-- `yfinance` — Yahoo Finance price data
-- `pandas`
+- `yfinance>=1.2.0` — Yahoo Finance price data
+- `pandas>=2.3.0`
+- `concurrent.futures` (stdlib) — used for concurrent ticker fetching
+
+## Dependency File
+- `environment.yml` — conda environment definition (Python 3.13, yfinance, pandas)
 
 ## Data Sources
 ### `ubs_live_price_holdings()` (from `claudedev_shared`)
@@ -43,15 +47,22 @@ Used fields:
 | `SYMBOL` | Brokerage symbol |
 | `SOD VALUE` | Start-of-day USD value |
 | `Ticker Alias` | Yahoo Finance ticker |
+| `Source` | Account source: `"UBS"` or `"401K"` (set by `claudedev_shared`) |
 | `Last Price` | Current price from yfinance |
 | `Last Close` | Prior regular session close (`regular_market_previous_close`) |
 | `% Move On Day` | `(Last Price - Last Close) / Last Close` (decimal, e.g. 0.0179 = 1.79%) |
 | `PnL` | `SOD VALUE * % Move On Day` — intraday USD P&L per position |
 
+## PnL Summary Output
+Per-source PnL printed via `df.groupby('Source')['PnL'].sum()`, followed by total.
+
 ## Important Notes
 - Use `regular_market_previous_close` (not `previous_close`) for the prior close. `previous_close` includes after-hours prices and gives incorrect results.
 - `% Move On Day` is stored as a decimal (not multiplied by 100).
 - `PnL = SOD VALUE * % Move On Day` (no division by 100 needed since % Move On Day is decimal).
+- Ticker prices are fetched concurrently via `ThreadPoolExecutor` for speed.
+- `get_price_data()` is a module-level function (not nested in `__main__`).
+- Failed ticker lookups print a warning and return `None` values rather than raising.
 
 ## Git
 - Always include `.claude/` directory in commits.
