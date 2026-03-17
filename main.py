@@ -15,8 +15,9 @@ if __name__ == '__main__':
         except Exception:
             return None, None, None
 
-    df[['Last Price', 'Last Close', '% Move On Day']] = df['Ticker Alias'].apply(
-        lambda t: get_price_data(t)
-    ).apply(pd.Series)
+    print("Getting Prices")
+    df[['Last Price', 'Last Close', '% Move On Day']] = df['Ticker Alias'].apply(lambda t: get_price_data(t)).apply(pd.Series)
+    print("Calculating PnL")
     df['PnL'] = df['SOD VALUE'] * df['% Move On Day']
-    print(df)
+    print("Total PnL", df['PnL'].sum())
+    i=0
