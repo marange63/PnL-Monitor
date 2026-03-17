@@ -7,9 +7,10 @@ if __name__ == '__main__':
     def get_daily_pct_move(ticker):
         try:
             data = yf.Ticker(ticker).fast_info
-            return round((data.last_price - data.previous_close) / data.previous_close * 100, 2)
+            return (data.last_price - data.previous_close) / data.previous_close
         except Exception:
             return None
 
     df['% Move On Day'] = df['Ticker Alias'].apply(get_daily_pct_move)
+    df['PnL'] = df['SOD VALUE'] * df['% Move On Day']
     print(df)
