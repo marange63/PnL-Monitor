@@ -8,4 +8,5 @@ dependencies:
   - pip:
     - yfinance>=1.2.0
     - pandas>=2.3.0
+    - matplotlib>=3.10.0
     - claudedev_shared

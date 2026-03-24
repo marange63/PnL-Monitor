@@ -14,7 +14,8 @@
       "Bash(\"/c/Users/wamfo/anaconda3/envs/PnL-Monitor/python.exe\" -c \"import yfinance; print\\(''yfinance'', yfinance.__version__\\)\")",
       "Bash(\"/c/Users/wamfo/anaconda3/envs/PnL-Monitor/python.exe\" -c \"import pandas; print\\(''pandas'', pandas.__version__\\)\")",
       "Bash(git add:*)",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "Bash(git push:*)"
     ]
   }
 }
