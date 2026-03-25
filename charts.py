@@ -82,6 +82,23 @@ def build_bar_df(df, sort_by_name=False, grouped=True, return_mode=False):
     return bar_df.reset_index(drop=True)
 
 
+def build_tag_bar_df(df, sort_by_name=False):
+    """Group PnL by Tag. Always grouped; ignores Group Tickers toggle."""
+    bar_df = (
+        df[['Tag', 'PnL']]
+        .dropna()
+        .groupby('Tag', as_index=False)
+        .agg({'PnL': 'sum'})
+    )
+    bar_df['Label'] = bar_df['Tag']
+    bar_df['Value'] = bar_df['PnL']
+    if sort_by_name:
+        bar_df = bar_df.sort_values('Label', ascending=False)
+    else:
+        bar_df = bar_df.sort_values('Value', key=abs, ascending=True)
+    return bar_df.reset_index(drop=True)
+
+
 def draw_bar(ax_bar, bar_df, return_mode=False):
     bar_colors = [PNL_NEG_COLOR if v < 0 else PNL_POS_COLOR for v in bar_df['Value']]
     ax_bar.clear()
@@ -92,7 +109,7 @@ def draw_bar(ax_bar, bar_df, return_mode=False):
     ax_bar.xaxis.set_major_formatter(pct_fmt if return_mode else dollar_fmt)
     ax_bar.xaxis.set_major_locator(plt.MaxNLocator(nbins=4, prune='both'))
     ax_bar.set_facecolor("#f8f8f8")
-    ax_bar.margins(y=0.01, x=0.18)
+    ax_bar.margins(y=0.01, x=0.25)
 
     for bar in ax_bar.patches:
         w = bar.get_width()

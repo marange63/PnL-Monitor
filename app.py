@@ -6,7 +6,7 @@ from typing import Optional
 
 import pandas as pd
 import tkinter as tk
-from tkinter import font as tkfont
+from tkinter import font as tkfont, filedialog
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
@@ -16,7 +16,7 @@ from constants import (
     PNL_POS_COLOR, PNL_NEG_COLOR,
 )
 from data import load_and_compute
-from charts import draw_scatter, build_bar_df, draw_bar
+from charts import draw_scatter, build_bar_df, draw_bar, build_tag_bar_df
 
 
 @dataclass
@@ -24,10 +24,12 @@ class AppState:
     plot_df: Optional[pd.DataFrame] = None      # full per-position DataFrame
     scatter_df: Optional[pd.DataFrame] = None   # what's currently plotted (may be grouped)
     current_bar_df: Optional[pd.DataFrame] = None
+    current_tag_bar_df: Optional[pd.DataFrame] = None
     auto_running: bool = False
     auto_after_id: Optional[str] = None
     countdown_id: Optional[str] = None
     bar_resize_id: Optional[str] = None
+    tag_bar_resize_id: Optional[str] = None
 
 
 class PnLApp:
@@ -36,8 +38,9 @@ class PnLApp:
         self.state = AppState()
 
         root.title("PnL Monitor")
-        root.columnconfigure(0, weight=3)
-        root.columnconfigure(1, weight=2)
+        root.columnconfigure(0, weight=9)
+        root.columnconfigure(1, weight=6)
+        root.columnconfigure(2, weight=7)
         root.rowconfigure(1, weight=1)
 
         self._label_font = tkfont.Font(family="Segoe UI", size=11)
@@ -46,6 +49,7 @@ class PnLApp:
         self._build_controls()
         self._build_scatter()
         self._build_bar()
+        self._build_tag_bar()
         self._build_tooltip()
 
     # ------------------------------------------------------------------ build
@@ -53,7 +57,7 @@ class PnLApp:
     def _build_controls(self):
         pad = {"padx": 16, "pady": 8}
         ctrl = tk.Frame(self.root)
-        ctrl.grid(row=0, column=0, columnspan=2, sticky="ew")
+        ctrl.grid(row=0, column=0, columnspan=3, sticky="ew")
         ctrl.columnconfigure((0, 1, 2), weight=1)
 
         btn_frame = tk.Frame(ctrl)
@@ -93,8 +97,13 @@ class PnLApp:
         self.sort_by_name = tk.BooleanVar(value=False)
         tk.Checkbutton(
             btn_frame, text="Sort A–Z", font=self._label_font,
-            variable=self.sort_by_name, command=self.redraw_bar
+            variable=self.sort_by_name, command=self._redraw_bars
         ).grid(row=0, column=5)
+
+        tk.Button(
+            btn_frame, text="Export CSV", font=self._label_font, width=12,
+            command=self._export_scatter_csv
+        ).grid(row=0, column=6, padx=(16, 0))
 
         self.status_var = tk.StringVar(value="Ready.")
         tk.Label(ctrl, textvariable=self.status_var, font=self._label_font, fg="gray").grid(
@@ -131,7 +140,7 @@ class PnLApp:
 
     def _build_bar(self):
         bar_outer = tk.Frame(self.root)
-        bar_outer.grid(row=1, column=1, sticky="nsew", padx=(8, 16), pady=(0, 16))
+        bar_outer.grid(row=1, column=1, sticky="nsew", padx=(8, 8), pady=(0, 16))
         bar_outer.rowconfigure(0, weight=1)
         bar_outer.columnconfigure(0, weight=1)
 
@@ -155,6 +164,33 @@ class PnLApp:
         self.bar_scroll_canvas.bind("<MouseWheel>", self._on_bar_mousewheel)
         self.bar_canvas_widget.bind("<MouseWheel>", self._on_bar_mousewheel)
         self.bar_fig.canvas.mpl_connect('motion_notify_event', self._on_bar_hover)
+
+    def _build_tag_bar(self):
+        tag_outer = tk.Frame(self.root)
+        tag_outer.grid(row=1, column=2, sticky="nsew", padx=(8, 16), pady=(0, 16))
+        tag_outer.rowconfigure(0, weight=1)
+        tag_outer.columnconfigure(0, weight=1)
+
+        self.tag_scroll_canvas = tk.Canvas(tag_outer, highlightthickness=0)
+        tag_scrollbar = tk.Scrollbar(
+            tag_outer, orient="vertical", command=self.tag_scroll_canvas.yview)
+        self.tag_scroll_canvas.configure(yscrollcommand=tag_scrollbar.set)
+        tag_scrollbar.grid(row=0, column=1, sticky="ns")
+        self.tag_scroll_canvas.grid(row=0, column=0, sticky="nsew")
+
+        self.tag_fig, self.ax_tag_bar = plt.subplots(figsize=(4, 6), constrained_layout=True)
+        self.ax_tag_bar.set_facecolor("#f8f8f8")
+        self.ax_tag_bar.set_xlabel("PnL ($)")
+
+        self.tag_canvas = FigureCanvasTkAgg(self.tag_fig, master=self.tag_scroll_canvas)
+        self.tag_canvas_widget = self.tag_canvas.get_tk_widget()
+        self.tag_window_id = self.tag_scroll_canvas.create_window(
+            0, 0, anchor="nw", window=self.tag_canvas_widget)
+
+        self.tag_scroll_canvas.bind("<Configure>", self._on_tag_area_resize)
+        self.tag_scroll_canvas.bind("<MouseWheel>", self._on_tag_mousewheel)
+        self.tag_canvas_widget.bind("<MouseWheel>", self._on_tag_mousewheel)
+        self.tag_fig.canvas.mpl_connect('motion_notify_event', self._on_tag_bar_hover)
 
     def _build_tooltip(self):
         self.tip_win = tk.Toplevel(self.root)
@@ -192,6 +228,7 @@ class PnLApp:
                 self.state.plot_df = df
                 self._redraw_scatter()
                 self.redraw_bar()
+                self.redraw_tag_bar()
                 ts = datetime.datetime.now().strftime('%H:%M:%S')
                 self.status_var.set(f"Done.  Last update: {ts}")
 
@@ -242,9 +279,13 @@ class PnLApp:
 
     def _redraw_all(self):
         self._redraw_scatter()
-        self.redraw_bar()
+        self._redraw_bars()
 
-    # "Group Tickers" drives both charts
+    def _redraw_bars(self):
+        self.redraw_bar()
+        self.redraw_tag_bar()
+
+    # "Group Tickers" drives scatter + ticker bar (tag bar always grouped)
     _toggle_group = _redraw_all
 
     def _redraw_scatter(self):
@@ -257,6 +298,17 @@ class PnLApp:
             return_mode=self.return_mode_var.get(),
         )
         self.canvas.draw()
+
+    def _export_scatter_csv(self):
+        if self.state.scatter_df is None:
+            return
+        path = filedialog.asksaveasfilename(
+            defaultextension=".csv",
+            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
+            title="Export scatter data",
+        )
+        if path:
+            self.state.scatter_df.to_csv(path, index=False)
 
     # -------------------------------------------------------------- bar chart
 
@@ -296,6 +348,42 @@ class PnLApp:
     def _on_bar_mousewheel(self, event):
         self.bar_scroll_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
 
+    # --------------------------------------------------------------- tag bar chart
+
+    def redraw_tag_bar(self):
+        if self.state.plot_df is None:
+            return
+        tag_df = build_tag_bar_df(self.state.plot_df, sort_by_name=self.sort_by_name.get())
+        draw_bar(self.ax_tag_bar, tag_df)
+        self.state.current_tag_bar_df = tag_df
+
+        n = len(tag_df)
+        w_px = max(self.tag_canvas_widget.winfo_width(), 100)
+        h_px = int(max(BAR_MIN_HEIGHT_INCHES, n * BAR_ROW_HEIGHT_INCHES)
+                   * self.ax_tag_bar.figure.dpi)
+        self.tag_canvas_widget.config(width=w_px, height=h_px)
+        self.tag_scroll_canvas.itemconfigure(self.tag_window_id, width=w_px)
+        self.tag_scroll_canvas.configure(scrollregion=(0, 0, w_px, h_px))
+        self.tag_canvas.draw()
+
+    def _on_tag_area_resize(self, event):
+        w = event.width
+        if self.state.tag_bar_resize_id:
+            self.root.after_cancel(self.state.tag_bar_resize_id)
+        self.state.tag_bar_resize_id = self.root.after(
+            BAR_RESIZE_DEBOUNCE_MS, lambda: self._do_tag_resize(w))
+
+    def _do_tag_resize(self, w):
+        if w < 10:
+            return
+        h_px = int(self.tag_fig.get_figheight() * self.tag_fig.dpi)
+        self.tag_canvas_widget.config(width=w, height=h_px)
+        self.tag_scroll_canvas.itemconfigure(self.tag_window_id, width=w)
+        self.tag_scroll_canvas.configure(scrollregion=(0, 0, w, h_px))
+
+    def _on_tag_mousewheel(self, event):
+        self.tag_scroll_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
     # --------------------------------------------------------------- tooltips
 
     def _show_tooltip(self, text, widget, event):
@@ -321,9 +409,11 @@ class PnLApp:
                     sources_str = row['Sources']
                     per_source = self.state.plot_df[
                         self.state.plot_df['Ticker Alias'] == ticker]
+                    symbols_str = ', '.join(sorted(per_source['SYMBOL'].unique()))
                     y_label = f"{y * 100:+.2f}%" if ret else f"${y:,.2f}"
                     lines = [
                         f"Ticker:         {ticker}",
+                        f"Symbols:       {symbols_str}",
                         f"Sources:       {sources_str}",
                         f"SOD VALUE:  ${x:,.2f}",
                         f"{'Total Return' if ret else 'Total PnL'}:  {y_label}",
@@ -334,7 +424,9 @@ class PnLApp:
                     text = '\n'.join(lines)
                 else:
                     y_label = f"{y * 100:+.2f}%" if ret else f"${y:,.2f}"
-                    text = (f"Source:        {row['Source']}\n"
+                    text = (f"Ticker:         {row['Ticker Alias']}\n"
+                            f"Symbol:        {row['SYMBOL']}\n"
+                            f"Source:        {row['Source']}\n"
                             f"SOD VALUE:  ${x:,.2f}\n"
                             f"{'Return' if ret else 'PnL'}:  {y_label}")
                 self._show_tooltip(text, self.canvas.get_tk_widget(), event)
@@ -365,6 +457,32 @@ class PnLApp:
                     text = f"{desc}\n{ticker}{src_label}:  {pct * 100:+.2f}%"
                     self._show_tooltip(text, self.bar_canvas.get_tk_widget(), event)
                     return
+        self.tip_win.withdraw()
+
+    def _on_tag_bar_hover(self, event):
+        if (event.inaxes != self.ax_tag_bar
+                or self.state.current_tag_bar_df is None
+                or event.ydata is None):
+            self.tip_win.withdraw()
+            return
+        i = round(event.ydata)
+        n = len(self.state.current_tag_bar_df)
+        if 0 <= i < n and abs(event.ydata - i) <= 0.4:
+            row = self.state.current_tag_bar_df.iloc[i]
+            tag = row['Tag']
+            pnl = row['PnL']
+            if self.state.plot_df is not None:
+                positions = self.state.plot_df[self.state.plot_df['Tag'] == tag]
+                tickers = ', '.join(sorted(positions['Ticker Alias'].unique()))
+                symbols = ', '.join(sorted(positions['SYMBOL'].unique()))
+                sod = positions['SOD VALUE'].sum()
+                text = (f"Tag: {tag}\n"
+                        f"SOD VALUE:  ${sod:,.0f}\n"
+                        f"PnL: ${pnl:,.0f}\n"
+                        f"Tickers: {tickers}\n"
+                        f"Symbols: {symbols}")
+                self._show_tooltip(text, self.tag_canvas.get_tk_widget(), event)
+                return
         self.tip_win.withdraw()
 
     # ----------------------------------------------------------------- log x
