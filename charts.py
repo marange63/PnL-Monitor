@@ -1,9 +1,67 @@
 import matplotlib.pyplot as plt
+import squarify
 
 from constants import SOURCE_COLORS, MULTI_SOURCE_COLOR, PNL_POS_COLOR, PNL_NEG_COLOR
 
 dollar_fmt = plt.FuncFormatter(lambda x, _: f"${x:,.0f}")
 pct_fmt = plt.FuncFormatter(lambda x, _: f"{x * 100:+.2f}%")
+
+
+def draw_treemap(ax, df, grouped=False):
+    """Draw a treemap sized by SOD VALUE, colored by % move (RdYlGn).
+    Returns (rects, plot_data) for hover hit-testing, or ([], empty_df) if no data.
+    """
+    ax.clear()
+    ax.set_axis_off()
+
+    if grouped:
+        agg = (df.groupby('Ticker Alias').agg(
+                PnL=('PnL', 'sum'),
+                SOD_VALUE=('SOD VALUE', 'sum'),
+            ).reset_index()
+              .rename(columns={'SOD_VALUE': 'SOD VALUE'}))
+        agg['pct_move'] = agg['PnL'] / agg['SOD VALUE']
+        plot_data = agg
+    else:
+        plot_data = (df[['Ticker Alias', 'SOD VALUE', 'PnL', '% Move On Day']]
+                     .dropna()
+                     .rename(columns={'% Move On Day': 'pct_move'})
+                     .reset_index(drop=True))
+
+    plot_data = (plot_data[plot_data['PnL'].notna()]
+                 .assign(abs_pnl=lambda d: d['PnL'].abs())
+                 .query('abs_pnl > 0')
+                 .sort_values('abs_pnl', ascending=False)
+                 .reset_index(drop=True))
+    if plot_data.empty:
+        return [], plot_data
+
+    fig_w, fig_h = ax.figure.get_size_inches()
+    sizes = squarify.normalize_sizes(plot_data['abs_pnl'].tolist(), fig_w, fig_h)
+    rects = squarify.squarify(sizes, 0, 0, fig_w, fig_h)
+
+    pct_moves = plot_data['pct_move'].tolist()
+    max_abs = max(max(abs(p) for p in pct_moves), 1e-6)
+    cmap = plt.cm.RdYlGn
+    norm = plt.Normalize(vmin=-max_abs, vmax=max_abs)
+
+    for rect, color, (_, row) in zip(rects, [cmap(norm(p)) for p in pct_moves],
+                                     plot_data.iterrows()):
+        ax.add_patch(plt.Rectangle(
+            (rect['x'], rect['y']), rect['dx'], rect['dy'],
+            facecolor=color, edgecolor='white', linewidth=1.5, zorder=1))
+        if min(rect['dx'], rect['dy']) > fig_w * 0.06:
+            ax.text(rect['x'] + rect['dx'] / 2, rect['y'] + rect['dy'] / 2,
+                    f"{row['Ticker Alias']}\n{row['pct_move'] * 100:+.1f}%",
+                    ha='center', va='center', fontsize=7,
+                    color='black', clip_on=True, zorder=2)
+
+    ax.set_xlim(0, fig_w)
+    ax.set_ylim(fig_h, 0)  # invert y so squarify's origin is upper-left
+    ax.add_patch(plt.Rectangle((0, 0), 1, 1, fill=False, edgecolor='black',
+                                linewidth=1.5, transform=ax.transAxes,
+                                clip_on=False, zorder=10))
+    return rects, plot_data.reset_index(drop=True)
 
 
 def build_grouped_scatter_df(df):

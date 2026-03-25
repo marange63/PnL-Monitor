@@ -6,7 +6,7 @@ from typing import Optional
 
 import pandas as pd
 import tkinter as tk
-from tkinter import font as tkfont, filedialog
+from tkinter import font as tkfont, filedialog, ttk
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
@@ -16,7 +16,7 @@ from constants import (
     PNL_POS_COLOR, PNL_NEG_COLOR,
 )
 from data import load_and_compute
-from charts import draw_scatter, build_bar_df, draw_bar, build_tag_bar_df
+from charts import draw_scatter, build_bar_df, draw_bar, build_tag_bar_df, draw_treemap
 
 
 @dataclass
@@ -25,11 +25,14 @@ class AppState:
     scatter_df: Optional[pd.DataFrame] = None   # what's currently plotted (may be grouped)
     current_bar_df: Optional[pd.DataFrame] = None
     current_tag_bar_df: Optional[pd.DataFrame] = None
+    treemap_rects: Optional[list] = None
+    treemap_df: Optional[pd.DataFrame] = None
     auto_running: bool = False
     auto_after_id: Optional[str] = None
     countdown_id: Optional[str] = None
     bar_resize_id: Optional[str] = None
     tag_bar_resize_id: Optional[str] = None
+    treemap_resize_id: Optional[str] = None
 
 
 class PnLApp:
@@ -38,15 +41,17 @@ class PnLApp:
         self.state = AppState()
 
         root.title("PnL Monitor")
-        root.columnconfigure(0, weight=9)
-        root.columnconfigure(1, weight=6)
-        root.columnconfigure(2, weight=7)
+        root.columnconfigure(0, weight=1)
         root.rowconfigure(1, weight=1)
 
         self._label_font = tkfont.Font(family="Segoe UI", size=11)
         self._value_font = tkfont.Font(family="Segoe UI", size=14, weight="bold")
 
+        self.paned = ttk.PanedWindow(root, orient=tk.HORIZONTAL)
+        self.paned.grid(row=1, column=0, sticky="nsew", padx=8, pady=(0, 8))
+
         self._build_controls()
+        self._build_treemap()
         self._build_scatter()
         self._build_bar()
         self._build_tag_bar()
@@ -57,7 +62,7 @@ class PnLApp:
     def _build_controls(self):
         pad = {"padx": 16, "pady": 8}
         ctrl = tk.Frame(self.root)
-        ctrl.grid(row=0, column=0, columnspan=3, sticky="ew")
+        ctrl.grid(row=0, column=0, sticky="ew")
         ctrl.columnconfigure((0, 1, 2), weight=1)
 
         btn_frame = tk.Frame(ctrl)
@@ -129,20 +134,25 @@ class PnLApp:
             self.pnl_labels[key] = lbl
 
     def _build_scatter(self):
+        scatter_frame = tk.Frame(self.paned)
+        scatter_frame.rowconfigure(0, weight=1)
+        scatter_frame.columnconfigure(0, weight=1)
+        self.paned.add(scatter_frame, weight=9)
+
         self.fig, self.ax = plt.subplots(figsize=(6, 4), constrained_layout=True)
         self.ax.set_facecolor("#f8f8f8")
         self.ax.set_xlabel("SOD VALUE ($)")
         self.ax.set_ylabel("PnL ($)")
-        self.canvas = FigureCanvasTkAgg(self.fig, master=self.root)
-        self.canvas.get_tk_widget().grid(
-            row=1, column=0, sticky="nsew", padx=(16, 8), pady=(0, 16))
+        self.canvas = FigureCanvasTkAgg(self.fig, master=scatter_frame)
+        self.canvas.get_tk_widget().grid(row=0, column=0, sticky="nsew")
         self.fig.canvas.mpl_connect('motion_notify_event', self._on_hover)
 
     def _build_bar(self):
-        bar_outer = tk.Frame(self.root)
-        bar_outer.grid(row=1, column=1, sticky="nsew", padx=(8, 8), pady=(0, 16))
+        bar_outer = tk.Frame(self.paned,
+                             highlightbackground='black', highlightthickness=2)
         bar_outer.rowconfigure(0, weight=1)
         bar_outer.columnconfigure(0, weight=1)
+        self.paned.add(bar_outer, weight=6)
 
         self.bar_scroll_canvas = tk.Canvas(bar_outer, highlightthickness=0)
         bar_scrollbar = tk.Scrollbar(
@@ -166,10 +176,11 @@ class PnLApp:
         self.bar_fig.canvas.mpl_connect('motion_notify_event', self._on_bar_hover)
 
     def _build_tag_bar(self):
-        tag_outer = tk.Frame(self.root)
-        tag_outer.grid(row=1, column=2, sticky="nsew", padx=(8, 16), pady=(0, 16))
+        tag_outer = tk.Frame(self.paned,
+                             highlightbackground='black', highlightthickness=2)
         tag_outer.rowconfigure(0, weight=1)
         tag_outer.columnconfigure(0, weight=1)
+        self.paned.add(tag_outer, weight=7)
 
         self.tag_scroll_canvas = tk.Canvas(tag_outer, highlightthickness=0)
         tag_scrollbar = tk.Scrollbar(
@@ -191,6 +202,21 @@ class PnLApp:
         self.tag_scroll_canvas.bind("<MouseWheel>", self._on_tag_mousewheel)
         self.tag_canvas_widget.bind("<MouseWheel>", self._on_tag_mousewheel)
         self.tag_fig.canvas.mpl_connect('motion_notify_event', self._on_tag_bar_hover)
+
+    def _build_treemap(self):
+        treemap_frame = tk.Frame(self.paned)
+        treemap_frame.rowconfigure(0, weight=1)
+        treemap_frame.columnconfigure(0, weight=1)
+        self.paned.add(treemap_frame, weight=7)
+
+        self.treemap_fig, self.ax_treemap = plt.subplots(
+            figsize=(5, 4), constrained_layout=True)
+        self.ax_treemap.set_axis_off()
+
+        self.treemap_canvas = FigureCanvasTkAgg(self.treemap_fig, master=treemap_frame)
+        self.treemap_canvas.get_tk_widget().grid(row=0, column=0, sticky="nsew")
+        self.treemap_fig.canvas.mpl_connect('motion_notify_event', self._on_treemap_hover)
+        treemap_frame.bind("<Configure>", self._on_treemap_resize)
 
     def _build_tooltip(self):
         self.tip_win = tk.Toplevel(self.root)
@@ -227,6 +253,7 @@ class PnLApp:
                     fg=PNL_POS_COLOR if total >= 0 else PNL_NEG_COLOR)
                 self.state.plot_df = df
                 self._redraw_scatter()
+                self.redraw_treemap()
                 self.redraw_bar()
                 self.redraw_tag_bar()
                 ts = datetime.datetime.now().strftime('%H:%M:%S')
@@ -279,6 +306,7 @@ class PnLApp:
 
     def _redraw_all(self):
         self._redraw_scatter()
+        self.redraw_treemap()
         self._redraw_bars()
 
     def _redraw_bars(self):
@@ -309,6 +337,23 @@ class PnLApp:
         )
         if path:
             self.state.scatter_df.to_csv(path, index=False)
+
+    # -------------------------------------------------------------- treemap
+
+    def redraw_treemap(self):
+        if self.state.plot_df is None:
+            return
+        rects, plot_data = draw_treemap(
+            self.ax_treemap, self.state.plot_df,
+            grouped=self.group_scatter_var.get())
+        self.state.treemap_rects = rects
+        self.state.treemap_df = plot_data
+        self.treemap_canvas.draw()
+
+    def _on_treemap_resize(self, event):
+        if self.state.treemap_resize_id:
+            self.root.after_cancel(self.state.treemap_resize_id)
+        self.state.treemap_resize_id = self.root.after(150, self.redraw_treemap)
 
     # -------------------------------------------------------------- bar chart
 
@@ -457,6 +502,25 @@ class PnLApp:
                     text = f"{desc}\n{ticker}{src_label}:  {pct * 100:+.2f}%"
                     self._show_tooltip(text, self.bar_canvas.get_tk_widget(), event)
                     return
+        self.tip_win.withdraw()
+
+    def _on_treemap_hover(self, event):
+        if (event.inaxes != self.ax_treemap
+                or not self.state.treemap_rects
+                or event.xdata is None):
+            self.tip_win.withdraw()
+            return
+        for i, rect in enumerate(self.state.treemap_rects):
+            if (rect['x'] <= event.xdata <= rect['x'] + rect['dx'] and
+                    rect['y'] <= event.ydata <= rect['y'] + rect['dy']):
+                row = self.state.treemap_df.iloc[i]
+                pct = row['pct_move']
+                text = (f"Ticker:        {row['Ticker Alias']}\n"
+                        f"SOD VALUE: ${row['SOD VALUE']:,.0f}\n"
+                        f"PnL:           ${row['PnL']:,.0f}\n"
+                        f"Move:         {pct * 100:+.2f}%")
+                self._show_tooltip(text, self.treemap_canvas.get_tk_widget(), event)
+                return
         self.tip_win.withdraw()
 
     def _on_tag_bar_hover(self, event):
