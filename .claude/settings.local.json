@@ -15,7 +15,8 @@
       "Bash(\"/c/Users/wamfo/anaconda3/envs/PnL-Monitor/python.exe\" -c \"import pandas; print\\(''pandas'', pandas.__version__\\)\")",
       "Bash(git add:*)",
       "Bash(git commit:*)",
-      "Bash(git push:*)"
+      "Bash(git push:*)",
+      "Bash(C:Userswamfoanaconda3envsPnL-Monitorpython.exe -c \"import app, charts, constants, data; print\\(''OK''\\)\")"
     ]
   }
 }

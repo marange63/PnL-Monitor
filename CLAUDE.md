@@ -43,7 +43,7 @@ Used fields:
 - `last_price` — current/latest price
 - `regular_market_previous_close` — official prior regular session close (**not** `previous_close`, which includes after-hours)
 
-## DataFrame Columns (computed in `main.py`)
+## DataFrame Columns (computed in `data.py`)
 | Column | Description |
 |---|---|
 | `DESCRIPTION` | Security full name |
@@ -56,60 +56,87 @@ Used fields:
 | `% Move On Day` | `(Last Price - Last Close) / Last Close` (decimal, e.g. 0.0179 = 1.79%) |
 | `PnL` | `SOD VALUE * % Move On Day` — intraday USD P&L per position |
 
-## GUI Layout (`main.py`)
+## Module Structure
+
+| File | Contents |
+|---|---|
+| `constants.py` | Named constants: colors, intervals, sizing |
+| `data.py` | `get_price_data(ticker)`, `load_and_compute(status_cb)` |
+| `charts.py` | `dollar_fmt`, `pct_fmt`, `draw_scatter()`, `build_grouped_scatter_df()`, `build_bar_df()`, `draw_bar()` |
+| `app.py` | `AppState` dataclass, `PnLApp` class |
+| `main.py` | 3-line entry point: `root = tk.Tk(); PnLApp(root); root.mainloop()` |
+
+## GUI Layout
 
 ### Top control strip (spans full width)
 - **Run** button — single manual run in a background thread
 - **Auto Update** button — runs every 60 s; label changes to **Stop (Ns)** with live countdown while active
-- **Log X axis** checkbox — toggles scatter plot x-axis between linear and log scale
+- **Log X axis** checkbox (default: **on**) — toggles scatter x-axis between linear and log scale
+- **Group Tickers** checkbox (default: **on**) — collapses both charts to one entry per Ticker Alias (PnL/SOD VALUE summed); when off, shows one entry per position
+- **Return %** checkbox (default: **off**) — switches both chart axes from PnL ($) to Return (PnL/SOD VALUE); bar annotations show `+1.23%` format
+- **Sort A–Z** checkbox — bar chart sorted alphabetically (default: sorted by absolute value, largest at top)
 - Status label — shows progress ("Loading holdings...", "Getting prices...", "Calculating PnL...", "Done.")
-- PnL summary box (grooved border, centered) — three labeled fields: **UBS PnL**, **401K PnL**, **Total PnL**
+- PnL summary box (grooved border, centered) — **UBS PnL**, **401K PnL**, **Total PnL** (colored green/red)
 
-### Bottom left — Scatter plot (weight 3)
-- X axis: SOD VALUE ($), Y axis: PnL ($)
-- Points coloured by Source: UBS = blue (`#1f77b4`), 401K = orange (`#ff7f0e`)
-- Each point labelled with its `Ticker Alias`
-- Dashed zero line
-- Dollar-formatted axes; x-axis capped at 6 ticks via `MaxNLocator`
-- Hover tooltip (yellow Toplevel popup) shows Source, SOD VALUE, PnL
+### Bottom left — Scatter plot (column weight 3)
+- X axis: SOD VALUE ($) [log or linear]; Y axis: PnL ($) or Return (%)
+- **Ungrouped**: one dot per position; UBS = blue (`#1f77b4`), 401K = orange (`#ff7f0e`)
+- **Grouped**: one dot per Ticker Alias (summed); single-source inherits source color; multi-source = purple (`#9467bd`)
+- Each point labelled with `Ticker Alias`; dashed zero line
+- Hover tooltip: Source / SOD VALUE / PnL or Return; grouped mode also shows per-source breakdown
 - Resizes with window via matplotlib's built-in `<Configure>` handler
 
-### Bottom right — Scrollable bar chart (weight 2)
-- Horizontally grouped by `Ticker Alias` (PnL summed across accounts)
-- Sorted descending by absolute PnL (largest at top)
-- Green bars (`#2ca02c`) for positive PnL, red (`#d62728`) for negative
-- Thin black border (`edgecolor='black', linewidth=0.5`) on each bar
-- PnL value labels: to the right for positive, to the left for negative
-- Row height: 0.28 inches per ticker; figure height auto-sizes after each run
-- Vertically scrollable (mouse wheel supported); width tracks panel width on resize
-- Resize: `bar_scroll_canvas <Configure>` → debounced 50 ms → `bar_canvas_widget.config(width, height)` triggers matplotlib's internal resize handler
+### Bottom right — Scrollable bar chart (column weight 2)
+- **Grouped** (default): one bar per Ticker Alias, PnL or Return summed/weighted across accounts
+- **Ungrouped**: one bar per position, labelled `"TICKER (Source)"`
+- Green bars (`#2ca02c`) positive, red (`#d62728`) negative; thin black border
+- Value labels right of positive bars, left of negative bars
+- Row height: 0.28 inches; figure height auto-sizes; minimum 3.0 inches
+- Vertically scrollable (mouse wheel); width tracks panel width on resize
+- Hover tooltip: security description + ticker + % move on day (ungrouped also shows source)
 
-## Code Structure
+## `AppState` dataclass (`app.py`)
+```python
+@dataclass
+class AppState:
+    plot_df: Optional[pd.DataFrame] = None      # full per-position DataFrame
+    scatter_df: Optional[pd.DataFrame] = None   # currently plotted scatter data (may be grouped)
+    current_bar_df: Optional[pd.DataFrame] = None
+    auto_running: bool = False
+    auto_after_id: Optional[str] = None
+    countdown_id: Optional[str] = None
+    bar_resize_id: Optional[str] = None
+```
 
-### Module-level
-- `get_price_data(ticker)` — fetches `(last_price, last_close, pct_move)` from yfinance; returns `(None, None, None)` on failure
+## `PnLApp` key methods (`app.py`)
+- `_build_controls()` / `_build_scatter()` / `_build_bar()` / `_build_tooltip()` — GUI construction
+- `_run_worker()` — background thread: calls `load_and_compute`, schedules `_update_ui` via `root.after(0, ...)`
+- `_redraw_scatter()` — redraws scatter from `state.plot_df` respecting current toggle states
+- `redraw_bar()` — redraws bar chart; always ends with `bar_canvas.draw()` so sort changes render without a size change
+- `_redraw_all()` — calls both (used by Group Tickers and Return % toggles)
+- `toggle_auto()`, `_start_auto_run()`, `_auto_worker()`, `_start_countdown()` — auto-update loop
+- `_show_tooltip(text, widget, event)` — shared helper for both hover handlers
+- `_on_hover(event)` — scatter hover; uses `coll.contains(event)` for hit detection
+- `_on_bar_hover(event)` — bar hover; uses `round(event.ydata)` (NOT `bar.contains`) to avoid DPI offset bugs
 
-### `run_pnl(...)` — main data function (runs in background thread)
-Parameters: `status_var, result_vars, run_btn, ax, canvas, ax_bar, bar_canvas, bar_scroll_canvas, plot_df`
-1. Loads holdings, fetches prices concurrently via `ThreadPoolExecutor`
-2. Computes PnL, updates summary fields
-3. Stores full DataFrame in `plot_df[0]` (for hover tooltip lookup)
-4. Redraws scatter plot and bar chart
-5. Resizes bar chart widget to fit ticker count
+## `charts.py` key functions
+- `draw_scatter(ax, df, log_x, grouped, return_mode)` → returns plotted DataFrame
+- `build_grouped_scatter_df(df)` → groups by Ticker Alias, adds `Return = PnL/SOD VALUE` and `Sources` columns
+- `build_bar_df(df, sort_by_name, grouped, return_mode)` → always includes `Label`, `Source`, `Value` columns
+- `draw_bar(ax_bar, bar_df, return_mode)` — uses `bar_df['Label']` for y-axis and `bar_df['Value']` for widths
+- `dollar_fmt`, `pct_fmt` — shared axis formatters
 
-### `__main__` state containers (mutable lists used as closures)
-- `plot_df = [None]` — latest DataFrame, used by hover tooltip
-- `auto_running = [False]` — auto-update loop flag
-- `auto_after_id = [None]` — handle for pending `root.after` run
-- `countdown_id = [None]` — handle for countdown ticker
-- `_bar_resize_id = [None]` — debounce handle for bar chart resize
+## `data.py` key functions
+- `get_price_data(ticker)` → `(last_price, last_close, pct_move)` or `(None, None, None)`
+- `load_and_compute(status_cb=None)` → full pipeline: load holdings, concurrent price fetch, compute PnL; calls `status_cb(msg)` for progress updates
 
 ## Important Notes
 - Use `regular_market_previous_close` (not `previous_close`) for the prior close.
 - `% Move On Day` is a decimal (not ×100). `PnL = SOD VALUE * % Move On Day`.
 - All tkinter widget updates from background threads go through `root.after(0, ...)`.
-- Bar chart resize relies on matplotlib's internal `<Configure>` handler — do NOT unbind it. Trigger resize by calling `bar_canvas_widget.config(width=w, height=h_px)`.
-- `bar_window_id` is a module-level name captured by the `run_pnl` closure; it must remain in scope.
+- Bar chart resize: `bar_canvas_widget.config(width=w, height=h_px)` triggers matplotlib's `<Configure>` handler which recreates `_tkphoto`. Do NOT unbind that handler. Always also call `bar_canvas.draw()` explicitly so content redraws when size is unchanged (e.g., sort toggle).
+- Bar hover uses `round(event.ydata)` to find bar index — `bar.contains(event)` is unreliable on Windows with DPI scaling.
+- `bar_df['Value']` holds the display value (PnL $ or Return decimal); `bar_df['Label']` holds the y-axis label.
 
 ## Git
 - Always include `.claude/` directory in commits.
