@@ -84,11 +84,17 @@ class PnLApp:
             variable=self.group_scatter_var, command=self._toggle_group
         ).grid(row=0, column=3, padx=(0, 8))
 
+        self.return_mode_var = tk.BooleanVar(value=False)
+        tk.Checkbutton(
+            btn_frame, text="Return %", font=self._label_font,
+            variable=self.return_mode_var, command=self._redraw_all
+        ).grid(row=0, column=4, padx=(0, 8))
+
         self.sort_by_name = tk.BooleanVar(value=False)
         tk.Checkbutton(
             btn_frame, text="Sort A–Z", font=self._label_font,
             variable=self.sort_by_name, command=self.redraw_bar
-        ).grid(row=0, column=4)
+        ).grid(row=0, column=5)
 
         self.status_var = tk.StringVar(value="Ready.")
         tk.Label(ctrl, textvariable=self.status_var, font=self._label_font, fg="gray").grid(
@@ -232,11 +238,14 @@ class PnLApp:
             self.state.countdown_id = self.root.after(
                 1000, lambda: self._start_countdown(secs_left - 1))
 
-    # ------------------------------------------------------------- scatter / group toggle
+    # ------------------------------------------------------------- scatter / toggles
 
-    def _toggle_group(self):
+    def _redraw_all(self):
         self._redraw_scatter()
         self.redraw_bar()
+
+    # "Group Tickers" drives both charts
+    _toggle_group = _redraw_all
 
     def _redraw_scatter(self):
         if self.state.plot_df is None:
@@ -245,6 +254,7 @@ class PnLApp:
             self.ax, self.state.plot_df,
             log_x=self.log_x_var.get(),
             grouped=self.group_scatter_var.get(),
+            return_mode=self.return_mode_var.get(),
         )
         self.canvas.draw()
 
@@ -254,8 +264,9 @@ class PnLApp:
         if self.state.plot_df is None:
             return
         bar_df = build_bar_df(self.state.plot_df, sort_by_name=self.sort_by_name.get(),
-                              grouped=self.group_scatter_var.get())
-        draw_bar(self.ax_bar, bar_df)
+                              grouped=self.group_scatter_var.get(),
+                              return_mode=self.return_mode_var.get())
+        draw_bar(self.ax_bar, bar_df, return_mode=self.return_mode_var.get())
         self.state.current_bar_df = bar_df
 
         n = len(bar_df)
@@ -304,24 +315,28 @@ class PnLApp:
                 i = ind['ind'][0]
                 x, y = coll.get_offsets()[i]
                 row = self.state.scatter_df.iloc[i]
+                ret = self.return_mode_var.get()
                 if self.group_scatter_var.get():
                     ticker = row['Ticker Alias']
                     sources_str = row['Sources']
                     per_source = self.state.plot_df[
                         self.state.plot_df['Ticker Alias'] == ticker]
+                    y_label = f"{y * 100:+.2f}%" if ret else f"${y:,.2f}"
                     lines = [
                         f"Ticker:         {ticker}",
                         f"Sources:       {sources_str}",
                         f"SOD VALUE:  ${x:,.2f}",
-                        f"Total PnL:    ${y:,.2f}",
+                        f"{'Total Return' if ret else 'Total PnL'}:  {y_label}",
                     ]
                     for _, sr in per_source.iterrows():
-                        lines.append(f"  {sr['Source']} PnL:  ${sr['PnL']:,.2f}")
+                        val = f"{sr['% Move On Day'] * 100:+.2f}%" if ret else f"${sr['PnL']:,.2f}"
+                        lines.append(f"  {sr['Source']} {'Return' if ret else 'PnL'}:  {val}")
                     text = '\n'.join(lines)
                 else:
+                    y_label = f"{y * 100:+.2f}%" if ret else f"${y:,.2f}"
                     text = (f"Source:        {row['Source']}\n"
                             f"SOD VALUE:  ${x:,.2f}\n"
-                            f"PnL:              ${y:,.2f}")
+                            f"{'Return' if ret else 'PnL'}:  {y_label}")
                 self._show_tooltip(text, self.canvas.get_tk_widget(), event)
                 return
         self.tip_win.withdraw()
