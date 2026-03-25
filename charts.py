@@ -48,15 +48,28 @@ def draw_scatter(ax, df, log_x=False, grouped=False):
     return plot_data.reset_index(drop=True)
 
 
-def build_bar_df(df, sort_by_name=False):
-    bar_df = (
-        df[['Ticker Alias', 'PnL']]
-        .dropna()
-        .groupby('Ticker Alias', as_index=False)['PnL']
-        .sum()
-    )
+def build_bar_df(df, sort_by_name=False, grouped=True):
+    """Build the DataFrame for the bar chart.
+
+    grouped=True  → one bar per Ticker Alias (PnL summed across sources)
+    grouped=False → one bar per position; label = 'TICKER (Source)'
+    Always adds 'Label' and 'Source' columns for hover lookup.
+    """
+    if grouped:
+        bar_df = (
+            df[['Ticker Alias', 'PnL']]
+            .dropna()
+            .groupby('Ticker Alias', as_index=False)['PnL']
+            .sum()
+        )
+        bar_df['Label'] = bar_df['Ticker Alias']
+        bar_df['Source'] = None
+    else:
+        bar_df = df[['Ticker Alias', 'Source', 'PnL']].dropna().copy()
+        bar_df['Label'] = bar_df['Ticker Alias'] + ' (' + bar_df['Source'] + ')'
+
     if sort_by_name:
-        bar_df = bar_df.sort_values('Ticker Alias', ascending=False)
+        bar_df = bar_df.sort_values('Label', ascending=False)
     else:
         bar_df = bar_df.sort_values('PnL', key=abs, ascending=True)
     return bar_df.reset_index(drop=True)
@@ -65,7 +78,7 @@ def build_bar_df(df, sort_by_name=False):
 def draw_bar(ax_bar, bar_df):
     bar_colors = [PNL_NEG_COLOR if p < 0 else PNL_POS_COLOR for p in bar_df['PnL']]
     ax_bar.clear()
-    ax_bar.barh(bar_df['Ticker Alias'], bar_df['PnL'], color=bar_colors,
+    ax_bar.barh(bar_df['Label'], bar_df['PnL'], color=bar_colors,
                 edgecolor='black', linewidth=0.5)
     ax_bar.axvline(0, color='gray', linewidth=0.8, linestyle='--')
     ax_bar.set_xlabel("PnL ($)")

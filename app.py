@@ -72,16 +72,16 @@ class PnLApp:
         )
         self.auto_btn.grid(row=0, column=1, padx=(8, 16))
 
-        self.log_x_var = tk.BooleanVar(value=False)
+        self.log_x_var = tk.BooleanVar(value=True)
         tk.Checkbutton(
             btn_frame, text="Log X axis", font=self._label_font,
             variable=self.log_x_var, command=self._toggle_log_x
         ).grid(row=0, column=2, padx=(0, 8))
 
-        self.group_scatter_var = tk.BooleanVar(value=False)
+        self.group_scatter_var = tk.BooleanVar(value=True)
         tk.Checkbutton(
             btn_frame, text="Group Tickers", font=self._label_font,
-            variable=self.group_scatter_var, command=self._redraw_scatter
+            variable=self.group_scatter_var, command=self._toggle_group
         ).grid(row=0, column=3, padx=(0, 8))
 
         self.sort_by_name = tk.BooleanVar(value=False)
@@ -232,7 +232,11 @@ class PnLApp:
             self.state.countdown_id = self.root.after(
                 1000, lambda: self._start_countdown(secs_left - 1))
 
-    # ------------------------------------------------------------- scatter
+    # ------------------------------------------------------------- scatter / group toggle
+
+    def _toggle_group(self):
+        self._redraw_scatter()
+        self.redraw_bar()
 
     def _redraw_scatter(self):
         if self.state.plot_df is None:
@@ -249,7 +253,8 @@ class PnLApp:
     def redraw_bar(self):
         if self.state.plot_df is None:
             return
-        bar_df = build_bar_df(self.state.plot_df, sort_by_name=self.sort_by_name.get())
+        bar_df = build_bar_df(self.state.plot_df, sort_by_name=self.sort_by_name.get(),
+                              grouped=self.group_scatter_var.get())
         draw_bar(self.ax_bar, bar_df)
         self.state.current_bar_df = bar_df
 
@@ -260,6 +265,7 @@ class PnLApp:
         self.bar_canvas_widget.config(width=w_px, height=h_px)
         self.bar_scroll_canvas.itemconfigure(self.bar_window_id, width=w_px)
         self.bar_scroll_canvas.configure(scrollregion=(0, 0, w_px, h_px))
+        self.bar_canvas.draw()  # re-render when content changes but size is unchanged
 
     def _on_bar_area_resize(self, event):
         w = event.width
@@ -329,14 +335,19 @@ class PnLApp:
         i = round(event.ydata)
         n = len(self.state.current_bar_df)
         if 0 <= i < n and abs(event.ydata - i) <= 0.4:
-            ticker = self.state.current_bar_df.iloc[i]['Ticker Alias']
+            row = self.state.current_bar_df.iloc[i]
+            ticker = row['Ticker Alias']
+            source = row['Source']  # None when grouped
             if self.state.plot_df is not None:
-                matches = self.state.plot_df[
-                    self.state.plot_df['Ticker Alias'] == ticker]
+                mask = self.state.plot_df['Ticker Alias'] == ticker
+                if source is not None:
+                    mask &= self.state.plot_df['Source'] == source
+                matches = self.state.plot_df[mask]
                 if not matches.empty:
                     desc = matches.iloc[0]['DESCRIPTION']
                     pct = matches.iloc[0]['% Move On Day']
-                    text = f"{desc}\n{ticker}:  {pct * 100:+.2f}%"
+                    src_label = f" ({source})" if source is not None else ""
+                    text = f"{desc}\n{ticker}{src_label}:  {pct * 100:+.2f}%"
                     self._show_tooltip(text, self.bar_canvas.get_tk_widget(), event)
                     return
         self.tip_win.withdraw()
