@@ -29,7 +29,9 @@
       "Bash(\"/c/Users/wamfo/anaconda3/envs/PnL-Monitor/python.exe\" -c \"\nimport pandas as pd\ndf = pd.read_csv\\(r'C:\\\\Users\\\\wamfo\\\\ClaudeDev\\\\data\\\\Ticker-Aliases-401K.csv'\\)\nprint\\(df.columns.tolist\\(\\)\\)\nprint\\(df.head\\(5\\).to_string\\(\\)\\)\n\")",
       "Bash(\"/c/Users/wamfo/anaconda3/envs/PnL-Monitor/python.exe\" -m pip install squarify --quiet)",
       "Bash(\"/c/Users/wamfo/anaconda3/envs/PnL-Monitor/python.exe\" -c \"import squarify; print\\(squarify.__version__\\)\")",
-      "Bash(\"/c/Users/wamfo/anaconda3/envs/PnL-Monitor/python.exe\" -c \"import squarify; print\\('ok'\\); rects = squarify.squarify\\([10,20,30], 0, 0, 5, 4\\); print\\(rects[0]\\)\")"
+      "Bash(\"/c/Users/wamfo/anaconda3/envs/PnL-Monitor/python.exe\" -c \"import squarify; print\\('ok'\\); rects = squarify.squarify\\([10,20,30], 0, 0, 5, 4\\); print\\(rects[0]\\)\")",
+      "Bash(\"/c/Users/wamfo/anaconda3/envs/PnL-Monitor/python.exe\" -m pip install sv-ttk --quiet)",
+      "Bash(\"/c/Users/wamfo/anaconda3/envs/PnL-Monitor/python.exe\" -c \"import sv_ttk; print\\(''sv-ttk ok''\\)\")"
     ]
   }
 }

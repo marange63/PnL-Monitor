@@ -98,7 +98,14 @@ def draw_scatter(ax, df, log_x=False, grouped=False, return_mode=False):
         for ticker, sod, y in zip(df['Ticker Alias'], df['SOD VALUE'], y_vals):
             ax.annotate(ticker, (sod, y), fontsize=7,
                         textcoords="offset points", xytext=(4, 4))
-    ax.axhline(0, color='gray', linewidth=0.8, linestyle='--')
+    ax.set_facecolor('white')
+    ax.set_axisbelow(True)
+    ax.grid(True, color='#e8e8e8', linewidth=0.5)
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    ax.spines['left'].set_color('#cccccc')
+    ax.spines['bottom'].set_color('#cccccc')
+    ax.axhline(0, color='#aaaaaa', linewidth=0.8, linestyle='--')
     xlabel = "SOD VALUE ($)  [log scale]" if log_x else "SOD VALUE ($)"
     ax.set_xlabel(xlabel)
     ax.set_ylabel("Return (%)" if return_mode else "PnL ($)")
@@ -162,11 +169,17 @@ def draw_bar(ax_bar, bar_df, return_mode=False):
     ax_bar.clear()
     ax_bar.barh(bar_df['Label'], bar_df['Value'], color=bar_colors,
                 edgecolor='black', linewidth=0.5)
-    ax_bar.axvline(0, color='gray', linewidth=0.8, linestyle='--')
+    ax_bar.set_facecolor('white')
+    ax_bar.set_axisbelow(True)
+    ax_bar.grid(True, axis='x', color='#e8e8e8', linewidth=0.5)
+    ax_bar.spines['top'].set_visible(False)
+    ax_bar.spines['right'].set_visible(False)
+    ax_bar.spines['left'].set_color('#cccccc')
+    ax_bar.spines['bottom'].set_color('#cccccc')
+    ax_bar.axvline(0, color='black', linewidth=0.8, linestyle='-')
     ax_bar.set_xlabel("Return (%)" if return_mode else "PnL ($)")
     ax_bar.xaxis.set_major_formatter(pct_fmt if return_mode else dollar_fmt)
     ax_bar.xaxis.set_major_locator(plt.MaxNLocator(nbins=4, prune='both'))
-    ax_bar.set_facecolor("#f8f8f8")
     ax_bar.margins(y=0.01, x=0.25)
 
     for bar in ax_bar.patches:

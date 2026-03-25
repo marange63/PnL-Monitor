@@ -10,4 +10,5 @@ dependencies:
     - pandas>=2.3.0
     - matplotlib>=3.10.0
     - squarify>=0.4.3
+    - sv-ttk>=2.6.0
     - claudedev_shared

@@ -61,57 +61,64 @@ class PnLApp:
 
     def _build_controls(self):
         pad = {"padx": 16, "pady": 8}
-        ctrl = tk.Frame(self.root)
+        ctrl = ttk.Frame(self.root)
         ctrl.grid(row=0, column=0, sticky="ew")
         ctrl.columnconfigure((0, 1, 2), weight=1)
 
-        btn_frame = tk.Frame(ctrl)
+        btn_frame = ttk.Frame(ctrl)
         btn_frame.grid(row=0, column=0, columnspan=3, **pad)
 
-        self.run_btn = tk.Button(
-            btn_frame, text="Run", font=self._label_font, width=12,
+        self.run_btn = ttk.Button(
+            btn_frame, text="Run", width=12,
             command=lambda: threading.Thread(
                 target=self._run_worker, daemon=True).start()
         )
         self.run_btn.grid(row=0, column=0, padx=(0, 8))
 
-        self.auto_btn = tk.Button(
-            btn_frame, text="Auto Update", font=self._label_font, width=12,
+        self.auto_btn = ttk.Button(
+            btn_frame, text="Auto Update", width=12,
             command=self.toggle_auto
         )
         self.auto_btn.grid(row=0, column=1, padx=(8, 16))
 
-        self.log_x_var = tk.BooleanVar(value=True)
-        tk.Checkbutton(
-            btn_frame, text="Log X axis", font=self._label_font,
-            variable=self.log_x_var, command=self._toggle_log_x
-        ).grid(row=0, column=2, padx=(0, 8))
+        ttk.Separator(btn_frame, orient=tk.VERTICAL).grid(
+            row=0, column=2, sticky="ns", padx=(0, 8))
 
-        self.group_scatter_var = tk.BooleanVar(value=True)
-        tk.Checkbutton(
-            btn_frame, text="Group Tickers", font=self._label_font,
-            variable=self.group_scatter_var, command=self._toggle_group
+        self.log_x_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(
+            btn_frame, text="Log X axis",
+            variable=self.log_x_var, command=self._toggle_log_x
         ).grid(row=0, column=3, padx=(0, 8))
 
-        self.return_mode_var = tk.BooleanVar(value=False)
-        tk.Checkbutton(
-            btn_frame, text="Return %", font=self._label_font,
-            variable=self.return_mode_var, command=self._redraw_all
+        self.group_scatter_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(
+            btn_frame, text="Group Tickers",
+            variable=self.group_scatter_var, command=self._toggle_group
         ).grid(row=0, column=4, padx=(0, 8))
 
-        self.sort_by_name = tk.BooleanVar(value=False)
-        tk.Checkbutton(
-            btn_frame, text="Sort A–Z", font=self._label_font,
-            variable=self.sort_by_name, command=self._redraw_bars
-        ).grid(row=0, column=5)
+        self.return_mode_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(
+            btn_frame, text="Return %",
+            variable=self.return_mode_var, command=self._redraw_all
+        ).grid(row=0, column=5, padx=(0, 8))
 
-        tk.Button(
-            btn_frame, text="Export CSV", font=self._label_font, width=12,
+        self.sort_by_name = tk.BooleanVar(value=False)
+        ttk.Checkbutton(
+            btn_frame, text="Sort A–Z",
+            variable=self.sort_by_name, command=self._redraw_bars
+        ).grid(row=0, column=6)
+
+        ttk.Separator(btn_frame, orient=tk.VERTICAL).grid(
+            row=0, column=7, sticky="ns", padx=(8, 0))
+
+        ttk.Button(
+            btn_frame, text="Export CSV", width=12,
             command=self._export_scatter_csv
-        ).grid(row=0, column=6, padx=(16, 0))
+        ).grid(row=0, column=8, padx=(8, 0))
 
         self.status_var = tk.StringVar(value="Ready.")
-        tk.Label(ctrl, textvariable=self.status_var, font=self._label_font, fg="gray").grid(
+        ttk.Label(ctrl, textvariable=self.status_var,
+                  foreground="gray").grid(
             row=1, column=0, columnspan=3, **pad)
 
         self.result_vars = {
@@ -120,17 +127,18 @@ class PnLApp:
             "Total": tk.StringVar(value="—"),
         }
 
-        fields = tk.Frame(ctrl, relief="groove", bd=2, padx=12, pady=8)
-        fields.grid(row=2, column=0, columnspan=3, pady=(4, 12))
+        fields = ttk.LabelFrame(ctrl, text="", padding=(12, 6))
+        fields.grid(row=2, column=0, columnspan=3, pady=(0, 12))
 
         self.pnl_labels = {}
         for col, (label_text, key) in enumerate(
                 [("UBS PnL", "UBS"), ("401K PnL", "401K"), ("Total PnL", "Total")]):
-            tk.Label(fields, text=label_text, font=self._label_font, anchor="center").grid(
-                row=0, column=col, padx=20, pady=(6, 2))
-            lbl = tk.Label(fields, textvariable=self.result_vars[key],
-                           font=self._value_font, width=12, anchor="center")
-            lbl.grid(row=1, column=col, padx=20, pady=(0, 6))
+            ttk.Label(fields, text=label_text,
+                      font=self._label_font, anchor="center").grid(
+                row=0, column=col, padx=24, pady=(4, 2))
+            lbl = ttk.Label(fields, textvariable=self.result_vars[key],
+                            font=self._value_font, width=12, anchor="center")
+            lbl.grid(row=1, column=col, padx=24, pady=(0, 4))
             self.pnl_labels[key] = lbl
 
     def _build_scatter(self):
@@ -140,7 +148,7 @@ class PnLApp:
         self.paned.add(scatter_frame, weight=9)
 
         self.fig, self.ax = plt.subplots(figsize=(6, 4), constrained_layout=True)
-        self.ax.set_facecolor("#f8f8f8")
+        self.fig.patch.set_facecolor('none')
         self.ax.set_xlabel("SOD VALUE ($)")
         self.ax.set_ylabel("PnL ($)")
         self.canvas = FigureCanvasTkAgg(self.fig, master=scatter_frame)
@@ -155,14 +163,14 @@ class PnLApp:
         self.paned.add(bar_outer, weight=6)
 
         self.bar_scroll_canvas = tk.Canvas(bar_outer, highlightthickness=0)
-        bar_scrollbar = tk.Scrollbar(
+        bar_scrollbar = ttk.Scrollbar(
             bar_outer, orient="vertical", command=self.bar_scroll_canvas.yview)
         self.bar_scroll_canvas.configure(yscrollcommand=bar_scrollbar.set)
         bar_scrollbar.grid(row=0, column=1, sticky="ns")
         self.bar_scroll_canvas.grid(row=0, column=0, sticky="nsew")
 
         self.bar_fig, self.ax_bar = plt.subplots(figsize=(4, 6), constrained_layout=True)
-        self.ax_bar.set_facecolor("#f8f8f8")
+        self.bar_fig.patch.set_facecolor('none')
         self.ax_bar.set_xlabel("PnL ($)")
 
         self.bar_canvas = FigureCanvasTkAgg(self.bar_fig, master=self.bar_scroll_canvas)
@@ -183,14 +191,14 @@ class PnLApp:
         self.paned.add(tag_outer, weight=7)
 
         self.tag_scroll_canvas = tk.Canvas(tag_outer, highlightthickness=0)
-        tag_scrollbar = tk.Scrollbar(
+        tag_scrollbar = ttk.Scrollbar(
             tag_outer, orient="vertical", command=self.tag_scroll_canvas.yview)
         self.tag_scroll_canvas.configure(yscrollcommand=tag_scrollbar.set)
         tag_scrollbar.grid(row=0, column=1, sticky="ns")
         self.tag_scroll_canvas.grid(row=0, column=0, sticky="nsew")
 
         self.tag_fig, self.ax_tag_bar = plt.subplots(figsize=(4, 6), constrained_layout=True)
-        self.ax_tag_bar.set_facecolor("#f8f8f8")
+        self.tag_fig.patch.set_facecolor('none')
         self.ax_tag_bar.set_xlabel("PnL ($)")
 
         self.tag_canvas = FigureCanvasTkAgg(self.tag_fig, master=self.tag_scroll_canvas)
@@ -211,6 +219,7 @@ class PnLApp:
 
         self.treemap_fig, self.ax_treemap = plt.subplots(
             figsize=(5, 4), constrained_layout=True)
+        self.treemap_fig.patch.set_facecolor('none')
         self.ax_treemap.set_axis_off()
 
         self.treemap_canvas = FigureCanvasTkAgg(self.treemap_fig, master=treemap_frame)
@@ -232,7 +241,7 @@ class PnLApp:
     def _run_worker(self):
         self.root.after(0, lambda: self.run_btn.config(state=tk.DISABLED))
         self.root.after(0, lambda: [v.set("—") for v in self.result_vars.values()])
-        self.root.after(0, lambda: [lbl.config(fg="black")
+        self.root.after(0, lambda: [lbl.config(foreground="black")
                                     for lbl in self.pnl_labels.values()])
         try:
             df = load_and_compute(
@@ -247,10 +256,10 @@ class PnLApp:
                     if source in self.result_vars:
                         self.result_vars[source].set(f"${pnl:,.2f}")
                         color = PNL_POS_COLOR if pnl >= 0 else PNL_NEG_COLOR
-                        self.pnl_labels[source].config(fg=color)
+                        self.pnl_labels[source].config(foreground=color)
                 self.result_vars['Total'].set(f"${total:,.2f}")
                 self.pnl_labels['Total'].config(
-                    fg=PNL_POS_COLOR if total >= 0 else PNL_NEG_COLOR)
+                    foreground=PNL_POS_COLOR if total >= 0 else PNL_NEG_COLOR)
                 self.state.plot_df = df
                 self._redraw_scatter()
                 self.redraw_treemap()
