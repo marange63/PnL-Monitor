@@ -53,7 +53,7 @@ def draw_treemap(ax, df, grouped=False):
         if min(rect['dx'], rect['dy']) > fig_w * 0.06:
             ax.text(rect['x'] + rect['dx'] / 2, rect['y'] + rect['dy'] / 2,
                     f"{row['Ticker Alias']}\n{row['pct_move'] * 100:+.1f}%",
-                    ha='center', va='center', fontsize=7,
+                    ha='center', va='center', fontsize=7, fontweight='bold',
                     color='black', clip_on=True, zorder=2)
 
     ax.set_xlim(0, fig_w)
@@ -87,7 +87,7 @@ def draw_scatter(ax, df, log_x=False, grouped=False, return_mode=False):
         ax.scatter(plot_data['SOD VALUE'], y_vals, c=colors,
                    alpha=0.7, edgecolors='white', linewidths=0.5)
         for ticker, sod, y in zip(plot_data['Ticker Alias'], plot_data['SOD VALUE'], y_vals):
-            ax.annotate(ticker, (sod, y), fontsize=7,
+            ax.annotate(ticker, (sod, y), fontsize=8.5, fontweight='bold',
                         textcoords="offset points", xytext=(4, 4))
     else:
         plot_data = df
@@ -96,7 +96,7 @@ def draw_scatter(ax, df, log_x=False, grouped=False, return_mode=False):
         ax.scatter(df['SOD VALUE'], y_vals, c=colors, alpha=0.7,
                    edgecolors='white', linewidths=0.5)
         for ticker, sod, y in zip(df['Ticker Alias'], df['SOD VALUE'], y_vals):
-            ax.annotate(ticker, (sod, y), fontsize=7,
+            ax.annotate(ticker, (sod, y), fontsize=8.5, fontweight='bold',
                         textcoords="offset points", xytext=(4, 4))
     ax.set_facecolor('white')
     ax.set_axisbelow(True)
@@ -177,10 +177,11 @@ def draw_bar(ax_bar, bar_df, return_mode=False):
     ax_bar.spines['left'].set_color('#cccccc')
     ax_bar.spines['bottom'].set_color('#cccccc')
     ax_bar.axvline(0, color='black', linewidth=0.8, linestyle='-')
+    ax_bar.tick_params(axis='y', labelsize=7)
     ax_bar.set_xlabel("Return (%)" if return_mode else "PnL ($)")
     ax_bar.xaxis.set_major_formatter(pct_fmt if return_mode else dollar_fmt)
     ax_bar.xaxis.set_major_locator(plt.MaxNLocator(nbins=4, prune='both'))
-    ax_bar.margins(y=0.01, x=0.25)
+    ax_bar.margins(y=0.01, x=0.0)
 
     for bar in ax_bar.patches:
         w = bar.get_width()
@@ -194,3 +195,8 @@ def draw_bar(ax_bar, bar_df, return_mode=False):
             ax_bar.annotate(label, xy=(w, y),
                             xytext=(-4, 0), textcoords="offset points",
                             va='center', ha='right', fontsize=7)
+
+    # Expand x-limits by 30% on whichever side has labels so they don't clip
+    x0, x1 = ax_bar.get_xlim()
+    span = x1 - x0
+    ax_bar.set_xlim(x0 - span * 0.30, x1 + span * 0.30)

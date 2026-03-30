@@ -59,6 +59,16 @@ class PnLApp:
 
     # ------------------------------------------------------------------ build
 
+    def _action_btn(self, parent, text, command, width=12):
+        return tk.Button(
+            parent, text=text, width=width, command=command,
+            font=self._label_font,
+            bg='#2d5a9e', fg='white',
+            activebackground='#3a6fbf', activeforeground='white',
+            disabledforeground='#8899bb',
+            relief='raised', bd=3, padx=8, cursor='hand2',
+        )
+
     def _build_controls(self):
         pad = {"padx": 16, "pady": 8}
         ctrl = ttk.Frame(self.root)
@@ -68,17 +78,15 @@ class PnLApp:
         btn_frame = ttk.Frame(ctrl)
         btn_frame.grid(row=0, column=0, columnspan=3, **pad)
 
-        self.run_btn = ttk.Button(
-            btn_frame, text="Run", width=12,
+        self.run_btn = self._action_btn(
+            btn_frame, "Run", width=10,
             command=lambda: threading.Thread(
-                target=self._run_worker, daemon=True).start()
-        )
+                target=self._run_worker, daemon=True).start())
         self.run_btn.grid(row=0, column=0, padx=(0, 8))
 
-        self.auto_btn = ttk.Button(
-            btn_frame, text="Auto Update", width=12,
-            command=self.toggle_auto
-        )
+        self.auto_btn = self._action_btn(
+            btn_frame, "Auto Update", width=13,
+            command=self.toggle_auto)
         self.auto_btn.grid(row=0, column=1, padx=(8, 16))
 
         ttk.Separator(btn_frame, orient=tk.VERTICAL).grid(
@@ -111,8 +119,8 @@ class PnLApp:
         ttk.Separator(btn_frame, orient=tk.VERTICAL).grid(
             row=0, column=7, sticky="ns", padx=(8, 0))
 
-        ttk.Button(
-            btn_frame, text="Export CSV", width=12,
+        self._action_btn(
+            btn_frame, "Export CSV", width=12,
             command=self._export_scatter_csv
         ).grid(row=0, column=8, padx=(8, 0))
 
@@ -142,7 +150,8 @@ class PnLApp:
             self.pnl_labels[key] = lbl
 
     def _build_scatter(self):
-        scatter_frame = tk.Frame(self.paned)
+        scatter_frame = tk.Frame(self.paned,
+                                  highlightbackground='black', highlightthickness=2)
         scatter_frame.rowconfigure(0, weight=1)
         scatter_frame.columnconfigure(0, weight=1)
         self.paned.add(scatter_frame, weight=9)

@@ -31,7 +31,10 @@
       "Bash(\"/c/Users/wamfo/anaconda3/envs/PnL-Monitor/python.exe\" -c \"import squarify; print\\(squarify.__version__\\)\")",
       "Bash(\"/c/Users/wamfo/anaconda3/envs/PnL-Monitor/python.exe\" -c \"import squarify; print\\('ok'\\); rects = squarify.squarify\\([10,20,30], 0, 0, 5, 4\\); print\\(rects[0]\\)\")",
       "Bash(\"/c/Users/wamfo/anaconda3/envs/PnL-Monitor/python.exe\" -m pip install sv-ttk --quiet)",
-      "Bash(\"/c/Users/wamfo/anaconda3/envs/PnL-Monitor/python.exe\" -c \"import sv_ttk; print\\(''sv-ttk ok''\\)\")"
+      "Bash(\"/c/Users/wamfo/anaconda3/envs/PnL-Monitor/python.exe\" -c \"import sv_ttk; print\\(''sv-ttk ok''\\)\")",
+      "Bash(claude:*)",
+      "Bash(npm view:*)",
+      "Bash(npm install:*)"
     ]
   }
 }
