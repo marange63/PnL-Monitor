@@ -1,7 +1,11 @@
 import matplotlib.pyplot as plt
+import matplotlib.colors as mcolors
 import squarify
 
 from constants import SOURCE_COLORS, MULTI_SOURCE_COLOR, PNL_POS_COLOR, PNL_NEG_COLOR
+
+_RG_CMAP = mcolors.LinearSegmentedColormap.from_list(
+    "pnl_rg", [PNL_NEG_COLOR, PNL_POS_COLOR])
 
 dollar_fmt = plt.FuncFormatter(lambda x, _: f"${x:,.0f}")
 pct_fmt = plt.FuncFormatter(lambda x, _: f"{x * 100:+.2f}%")
@@ -42,7 +46,7 @@ def draw_treemap(ax, df, grouped=False):
 
     pct_moves = plot_data['pct_move'].tolist()
     max_abs = max(max(abs(p) for p in pct_moves), 1e-6)
-    cmap = plt.cm.RdYlGn
+    cmap = _RG_CMAP
     norm = plt.Normalize(vmin=-max_abs, vmax=max_abs)
 
     for rect, color, (_, row) in zip(rects, [cmap(norm(p)) for p in pct_moves],

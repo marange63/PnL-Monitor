@@ -34,7 +34,8 @@
       "Bash(\"/c/Users/wamfo/anaconda3/envs/PnL-Monitor/python.exe\" -c \"import sv_ttk; print\\(''sv-ttk ok''\\)\")",
       "Bash(claude:*)",
       "Bash(npm view:*)",
-      "Bash(npm install:*)"
+      "Bash(npm install:*)",
+      "Bash(npm show:*)"
     ]
   }
 }
