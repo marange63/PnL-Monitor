@@ -41,6 +41,38 @@ def get_price_data(ticker):
     return None, None, None
 
 
+ETF_DRAWDOWN_TICKERS = ("SPY", "QQQ", "IWM", "EEM")
+
+
+def _fetch_etf_drawdown(ticker):
+    try:
+        t = yf.Ticker(ticker)
+        last_price = t.fast_info.last_price
+        six_weeks_ago = (pd.Timestamp.today() - pd.Timedelta(weeks=6)).strftime("%Y-%m-%d")
+        hist_6w = t.history(start=six_weeks_ago, auto_adjust=False)
+        high_6w = float(hist_6w["High"].max()) if not hist_6w.empty else None
+        hist_max = t.history(period="max", auto_adjust=False)
+        high_ath = float(hist_max["High"].max()) if not hist_max.empty else None
+        return {
+            "6W": (last_price - high_6w) / high_6w if high_6w else None,
+            "ATH": (last_price - high_ath) / high_ath if high_ath else None,
+        }
+    except Exception as e:
+        print(f"Warning: ETF drawdown fetch failed for {ticker}: {e}")
+        return {"6W": None, "ATH": None}
+
+
+def get_etf_drawdowns():
+    """Return % drawdown of SPY/QQQ/IWM/EEM from 6-week and all-time highs.
+
+    Result: {ticker: {"6W": decimal_or_None, "ATH": decimal_or_None}}
+    """
+    with ThreadPoolExecutor(max_workers=4) as ex:
+        return dict(zip(
+            ETF_DRAWDOWN_TICKERS,
+            ex.map(_fetch_etf_drawdown, ETF_DRAWDOWN_TICKERS)))
+
+
 def load_and_compute(status_cb=None):
     if status_cb:
         status_cb("Loading holdings...")

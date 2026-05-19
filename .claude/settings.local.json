@@ -37,7 +37,8 @@
       "Bash(npm install:*)",
       "Bash(npm show:*)",
       "Bash(C:/Users/wamfo/anaconda3/envs/PnL-Monitor/python.exe:*)",
-      "Bash(dir *)"
+      "Bash(dir *)",
+      "Bash(C:\\\\Users\\\\wamfo\\\\anaconda3\\\\envs\\\\PnL-Monitor\\\\python.exe *)"
     ]
   }
 }

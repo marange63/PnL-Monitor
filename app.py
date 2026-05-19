@@ -15,7 +15,7 @@ from constants import (
     BAR_ROW_HEIGHT_INCHES, BAR_MIN_HEIGHT_INCHES, BAR_RESIZE_DEBOUNCE_MS,
     PNL_POS_COLOR, PNL_NEG_COLOR,
 )
-from data import load_and_compute
+from data import load_and_compute, get_etf_drawdowns, ETF_DRAWDOWN_TICKERS
 from charts import draw_scatter, build_bar_df, draw_bar, build_tag_bar_df, draw_treemap
 
 
@@ -73,10 +73,13 @@ class PnLApp:
         pad = {"padx": 16, "pady": 8}
         ctrl = ttk.Frame(self.root)
         ctrl.grid(row=0, column=0, sticky="ew")
-        ctrl.columnconfigure((0, 1, 2), weight=1)
+        ctrl.columnconfigure(0, weight=0)
+        ctrl.columnconfigure(1, weight=1)
+
+        self._build_etf_table(ctrl)
 
         btn_frame = ttk.Frame(ctrl)
-        btn_frame.grid(row=0, column=0, columnspan=3, **pad)
+        btn_frame.grid(row=0, column=1, **pad)
 
         self.run_btn = self._action_btn(
             btn_frame, "Run", width=10,
@@ -127,7 +130,7 @@ class PnLApp:
         self.status_var = tk.StringVar(value="Ready.")
         ttk.Label(ctrl, textvariable=self.status_var,
                   foreground="gray").grid(
-            row=1, column=0, columnspan=3, **pad)
+            row=1, column=1, **pad)
 
         self.result_vars = {
             "UBS": tk.StringVar(value="—"),
@@ -136,7 +139,7 @@ class PnLApp:
         }
 
         fields = ttk.LabelFrame(ctrl, text="", padding=(12, 6))
-        fields.grid(row=2, column=0, columnspan=3, pady=(0, 12))
+        fields.grid(row=2, column=1, pady=(0, 12))
 
         self.pnl_labels = {}
         for col, (label_text, key) in enumerate(
@@ -148,6 +151,43 @@ class PnLApp:
                             font=self._value_font, width=12, anchor="center")
             lbl.grid(row=1, column=col, padx=24, pady=(0, 4))
             self.pnl_labels[key] = lbl
+
+    def _build_etf_table(self, parent):
+        frame = ttk.LabelFrame(parent, text="ETF % from Highs", padding=(8, 6))
+        frame.grid(row=0, column=0, rowspan=3, sticky="nw", padx=(8, 16), pady=8)
+
+        ttk.Label(frame, text="ETF", font=self._label_font,
+                  anchor="center").grid(row=0, column=0, padx=8, pady=2)
+        ttk.Label(frame, text="6W High", font=self._label_font,
+                  anchor="center").grid(row=0, column=1, padx=8, pady=2)
+        ttk.Label(frame, text="All-Time High", font=self._label_font,
+                  anchor="center").grid(row=0, column=2, padx=8, pady=2)
+
+        self.etf_vars = {}
+        self.etf_labels = {}
+        for i, tkr in enumerate(ETF_DRAWDOWN_TICKERS, start=1):
+            ttk.Label(frame, text=tkr, font=self._label_font,
+                      anchor="center").grid(row=i, column=0, padx=8, pady=2)
+            for col, key in enumerate(("6W", "ATH"), start=1):
+                v = tk.StringVar(value="—")
+                lbl = ttk.Label(frame, textvariable=v, font=self._label_font,
+                                anchor="e", width=8)
+                lbl.grid(row=i, column=col, padx=8, pady=2)
+                self.etf_vars[(tkr, key)] = v
+                self.etf_labels[(tkr, key)] = lbl
+
+    def _update_etf_table(self, etf_dd):
+        for tkr, dd in etf_dd.items():
+            for key in ("6W", "ATH"):
+                val = dd.get(key)
+                var = self.etf_vars[(tkr, key)]
+                lbl = self.etf_labels[(tkr, key)]
+                if val is None:
+                    var.set("—")
+                    lbl.config(foreground="gray")
+                else:
+                    var.set(f"{val * 100:+.2f}%")
+                    lbl.config(foreground=PNL_NEG_COLOR if val < 0 else PNL_POS_COLOR)
 
     def _build_scatter(self):
         scatter_frame = tk.Frame(self.paned,
@@ -257,6 +297,9 @@ class PnLApp:
                 status_cb=lambda msg: self.root.after(
                     0, lambda m=msg: self.status_var.set(m)))
 
+            self.root.after(0, lambda: self.status_var.set("Fetching ETF highs..."))
+            etf_dd = get_etf_drawdowns()
+
             summary = df.groupby('Source')['PnL'].sum()
             total = df['PnL'].sum()
 
@@ -269,6 +312,7 @@ class PnLApp:
                 self.result_vars['Total'].set(f"${total:,.2f}")
                 self.pnl_labels['Total'].config(
                     foreground=PNL_POS_COLOR if total >= 0 else PNL_NEG_COLOR)
+                self._update_etf_table(etf_dd)
                 self.state.plot_df = df
                 self._redraw_scatter()
                 self.redraw_treemap()
