@@ -98,6 +98,37 @@ def get_etf_drawdowns():
             ex.map(_fetch_etf_drawdown, ETF_DRAWDOWN_TICKERS)))
 
 
+INTRADAY_TICKERS = ("SPY", "QQQ")
+
+
+def _fetch_intraday(ticker):
+    try:
+        t = yf.Ticker(ticker)
+        hist = t.history(period="1d", interval="1m", prepost=False)
+        prev_close = None
+        try:
+            prev_close = float(t.fast_info.regular_market_previous_close)
+        except Exception:
+            pass
+        if hist is None or hist.empty:
+            return {"hist": None, "prev_close": prev_close}
+        return {"hist": hist[["Close"]], "prev_close": prev_close}
+    except Exception as e:
+        print(f"Warning: intraday fetch failed for {ticker}: {e}")
+        return {"hist": None, "prev_close": None}
+
+
+def get_intraday_prices():
+    """Fetch today's 1-minute prices and previous close for SPY and QQQ.
+
+    Result: {ticker: {"hist": DataFrame|None with 'Close' column, "prev_close": float|None}}
+    """
+    with ThreadPoolExecutor(max_workers=len(INTRADAY_TICKERS)) as ex:
+        return dict(zip(
+            INTRADAY_TICKERS,
+            ex.map(_fetch_intraday, INTRADAY_TICKERS)))
+
+
 def load_and_compute(status_cb=None):
     if status_cb:
         status_cb("Loading holdings...")

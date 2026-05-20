@@ -3,19 +3,29 @@ import threading
 import traceback
 from dataclasses import dataclass
 from typing import Optional
+from zoneinfo import ZoneInfo
 
+ET_TZ = ZoneInfo("America/New_York")
+
+import numpy as np
 import pandas as pd
 import tkinter as tk
 from tkinter import font as tkfont, filedialog, ttk
 import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
+import matplotlib.ticker as mticker
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from matplotlib.collections import LineCollection
 
 from constants import (
     AUTO_UPDATE_INTERVAL_MS, AUTO_UPDATE_COUNTDOWN_SECS,
     BAR_ROW_HEIGHT_INCHES, BAR_MIN_HEIGHT_INCHES, BAR_RESIZE_DEBOUNCE_MS,
     PNL_POS_COLOR, PNL_NEG_COLOR,
 )
-from data import load_and_compute, get_etf_drawdowns, ETF_DRAWDOWN_TICKERS
+from data import (
+    load_and_compute, get_etf_drawdowns, ETF_DRAWDOWN_TICKERS,
+    get_intraday_prices, INTRADAY_TICKERS,
+)
 from charts import draw_scatter, build_bar_df, draw_bar, build_tag_bar_df, draw_treemap
 
 
@@ -77,6 +87,7 @@ class PnLApp:
         ctrl.columnconfigure(1, weight=1)
 
         self._build_etf_table(ctrl)
+        self._build_intraday_charts(ctrl)
 
         btn_frame = ttk.Frame(ctrl)
         btn_frame.grid(row=0, column=1, **pad)
@@ -175,6 +186,80 @@ class PnLApp:
                 lbl.grid(row=i, column=col, padx=8, pady=2)
                 self.etf_vars[(tkr, key)] = v
                 self.etf_labels[(tkr, key)] = lbl
+
+    def _build_intraday_charts(self, parent):
+        frame = ttk.LabelFrame(parent, text="Intraday", padding=(8, 6))
+        frame.grid(row=0, column=2, rowspan=3, sticky="ne", padx=(8, 8), pady=8)
+
+        self.intraday_figs = {}
+        self.intraday_axes = {}
+        self.intraday_canvases = {}
+        for col, tkr in enumerate(INTRADAY_TICKERS):
+            fig, ax = plt.subplots(figsize=(2.4, 1.4), constrained_layout=True)
+            fig.patch.set_facecolor('none')
+            ax.set_title(tkr, fontsize=9)
+            ax.tick_params(axis='both', labelsize=7)
+            ax.spines['top'].set_visible(False)
+            ax.spines['right'].set_visible(False)
+            canvas = FigureCanvasTkAgg(fig, master=frame)
+            canvas.get_tk_widget().grid(row=0, column=col, padx=4, pady=2)
+            self.intraday_figs[tkr] = fig
+            self.intraday_axes[tkr] = ax
+            self.intraday_canvases[tkr] = canvas
+
+    def _update_intraday_charts(self, intraday_data):
+        # Pass 1: compute % return series per ticker and find a shared y-range
+        series = {}
+        y_min, y_max = 0.0, 0.0
+        for tkr in self.intraday_axes:
+            entry = intraday_data.get(tkr) or {}
+            hist = entry.get("hist")
+            prev_close = entry.get("prev_close")
+            if hist is None or hist.empty:
+                series[tkr] = None
+                continue
+            ref = prev_close if prev_close else float(hist["Close"].iloc[0])
+            pct = (hist["Close"] - ref) / ref * 100.0
+            series[tkr] = (hist.index, pct)
+            y_min = min(y_min, float(pct.min()))
+            y_max = max(y_max, float(pct.max()))
+
+        margin = max(0.05, (y_max - y_min) * 0.1)
+        y_min -= margin
+        y_max += margin
+
+        # Pass 2: draw each chart with the shared y-range
+        for tkr, ax in self.intraday_axes.items():
+            ax.clear()
+            ax.tick_params(axis='both', labelsize=7)
+            ax.spines['top'].set_visible(False)
+            ax.spines['right'].set_visible(False)
+            data = series[tkr]
+            if data is None:
+                ax.set_title(f"{tkr}  —", fontsize=9, color="gray")
+                self.intraday_canvases[tkr].draw()
+                continue
+            idx, pct = data
+            last_pct = float(pct.iloc[-1])
+            title_color = PNL_POS_COLOR if last_pct >= 0 else PNL_NEG_COLOR
+
+            x = mdates.date2num(idx.to_pydatetime())
+            y = pct.to_numpy()
+            points = np.array([x, y]).T.reshape(-1, 1, 2)
+            segments = np.concatenate([points[:-1], points[1:]], axis=1)
+            seg_mid = (y[:-1] + y[1:]) / 2.0
+            seg_colors = np.where(seg_mid >= 0, PNL_POS_COLOR, PNL_NEG_COLOR)
+            ax.add_collection(LineCollection(segments, colors=seg_colors, linewidth=1.2))
+
+            ax.axhline(0, color="gray", linestyle=":", linewidth=0.7)
+            ax.set_xlim(x[0], x[-1])
+            ax.set_ylim(y_min, y_max)
+            ax.set_title(f"{tkr}  {last_pct:+.2f}%", fontsize=9, color=title_color)
+            ax.xaxis.set_major_locator(mdates.HourLocator(interval=1, tz=ET_TZ))
+            ax.xaxis.set_major_formatter(mdates.DateFormatter('%H', tz=ET_TZ))
+            ax.yaxis.set_major_formatter(
+                mticker.FuncFormatter(lambda v, _pos: f"{v:+.1f}%"))
+            self.intraday_canvases[tkr].draw()
 
     def _update_etf_table(self, etf_dd):
         for tkr, dd in etf_dd.items():
@@ -300,6 +385,9 @@ class PnLApp:
             self.root.after(0, lambda: self.status_var.set("Fetching ETF highs..."))
             etf_dd = get_etf_drawdowns()
 
+            self.root.after(0, lambda: self.status_var.set("Fetching intraday prices..."))
+            intraday = get_intraday_prices()
+
             summary = df.groupby('Source')['PnL'].sum()
             total = df['PnL'].sum()
 
@@ -313,6 +401,7 @@ class PnLApp:
                 self.pnl_labels['Total'].config(
                     foreground=PNL_POS_COLOR if total >= 0 else PNL_NEG_COLOR)
                 self._update_etf_table(etf_dd)
+                self._update_intraday_charts(intraday)
                 self.state.plot_df = df
                 self._redraw_scatter()
                 self.redraw_treemap()
