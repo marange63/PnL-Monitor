@@ -98,7 +98,7 @@ def get_etf_drawdowns():
             ex.map(_fetch_etf_drawdown, ETF_DRAWDOWN_TICKERS)))
 
 
-INTRADAY_TICKERS = ("SPY", "QQQ")
+INTRADAY_TICKERS = ("SPY", "QQQ", "IWM")
 
 
 def _fetch_intraday(ticker):

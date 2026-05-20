@@ -44,7 +44,7 @@ Daily portfolio PnL monitor covering a UBS brokerage account and a UBS 401k acco
 
 ### Top control strip
 Run · Auto Update (60 s loop; button relabels to `Stop (Ns)` with live countdown) · Log X axis · Group Tickers · Return % · Sort A–Z · Export CSV · status label · PnL summary (UBS / 401K / Total — values color-coded green/red).
-Two intraday thumbnail charts for SPY and QQQ sit to the right of the buttons (1-min bars, `period="1d"`). Y-axis is **% return vs previous close** with a shared y-range across both charts; line is drawn as a `LineCollection` so each segment is colored green or red by the sign of its midpoint; dotted gray line marks 0%; title shows ticker + current % move, colored by sign of latest value.
+Three intraday thumbnail charts for SPY, QQQ, and IWM sit to the right of the buttons (1-min bars, `period="1d"`). Y-axis is **% return vs previous close** with a shared y-range across both charts; line is drawn as a `LineCollection` so each segment is colored green or red by the sign of its midpoint; dotted gray line marks 0%; title shows ticker + current % move, colored by sign of latest value.
 
 ### Toggle interaction matrix
 | Toggle | Scatter | Treemap | Ticker bar | Tag bar |
