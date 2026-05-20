@@ -43,16 +43,41 @@ def get_price_data(ticker):
 
 ETF_DRAWDOWN_TICKERS = ("SPY", "QQQ", "IWM", "EEM")
 
+# Cached 6W/ATH highs per ticker. Highs only refresh once per calendar day;
+# `last_price` is still fetched on every call so the drawdown stays current.
+# If `last_price` exceeds the cached high intraday, the cache is bumped up so
+# we never report a positive drawdown.
+_etf_high_cache = {}  # {ticker: {"6W": float|None, "ATH": float|None, "as_of": date}}
+
+
+def _fetch_etf_highs(ticker):
+    t = yf.Ticker(ticker)
+    six_weeks_ago = (pd.Timestamp.today() - pd.Timedelta(weeks=6)).strftime("%Y-%m-%d")
+    hist_6w = t.history(start=six_weeks_ago, auto_adjust=False)
+    hist_max = t.history(period="max", auto_adjust=False)
+    return {
+        "6W": float(hist_6w["High"].max()) if not hist_6w.empty else None,
+        "ATH": float(hist_max["High"].max()) if not hist_max.empty else None,
+    }
+
 
 def _fetch_etf_drawdown(ticker):
     try:
-        t = yf.Ticker(ticker)
-        last_price = t.fast_info.last_price
-        six_weeks_ago = (pd.Timestamp.today() - pd.Timedelta(weeks=6)).strftime("%Y-%m-%d")
-        hist_6w = t.history(start=six_weeks_ago, auto_adjust=False)
-        high_6w = float(hist_6w["High"].max()) if not hist_6w.empty else None
-        hist_max = t.history(period="max", auto_adjust=False)
-        high_ath = float(hist_max["High"].max()) if not hist_max.empty else None
+        last_price = yf.Ticker(ticker).fast_info.last_price
+        today = pd.Timestamp.today().date()
+        cached = _etf_high_cache.get(ticker)
+        if cached is None or cached["as_of"] != today:
+            highs = _fetch_etf_highs(ticker)
+            cached = {**highs, "as_of": today}
+            _etf_high_cache[ticker] = cached
+
+        high_6w = cached["6W"]
+        high_ath = cached["ATH"]
+        if high_6w is not None and last_price > high_6w:
+            cached["6W"] = high_6w = last_price
+        if high_ath is not None and last_price > high_ath:
+            cached["ATH"] = high_ath = last_price
+
         return {
             "6W": (last_price - high_6w) / high_6w if high_6w else None,
             "ATH": (last_price - high_ath) / high_ath if high_ath else None,
