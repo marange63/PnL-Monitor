@@ -1,4 +1,6 @@
 import datetime
+import json
+import os
 import threading
 import traceback
 from dataclasses import dataclass
@@ -25,8 +27,29 @@ from constants import (
 from data import (
     load_and_compute, get_etf_drawdowns, ETF_DRAWDOWN_TICKERS,
     get_intraday_prices, INTRADAY_TICKERS,
+    get_drawdowns, validate_ticker,
 )
 from charts import draw_scatter, build_bar_df, draw_bar, build_tag_bar_df, draw_treemap
+
+MAX_CUSTOM_TICKERS = 4
+CUSTOM_TICKERS_FILE = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "custom_tickers.json")
+
+
+def _load_custom_tickers():
+    try:
+        with open(CUSTOM_TICKERS_FILE, "r") as f:
+            data = json.load(f)
+        if not isinstance(data, list):
+            return []
+        return [str(t).upper() for t in data][:MAX_CUSTOM_TICKERS]
+    except (FileNotFoundError, json.JSONDecodeError):
+        return []
+
+
+def _save_custom_tickers(tickers):
+    with open(CUSTOM_TICKERS_FILE, "w") as f:
+        json.dump(list(tickers), f)
 
 
 @dataclass
@@ -84,13 +107,15 @@ class PnLApp:
         ctrl = ttk.Frame(self.root)
         ctrl.grid(row=0, column=0, sticky="ew")
         ctrl.columnconfigure(0, weight=0)
-        ctrl.columnconfigure(1, weight=1)
+        ctrl.columnconfigure(1, weight=0)
+        ctrl.columnconfigure(2, weight=1)
 
         self._build_etf_table(ctrl)
+        self._build_custom_table(ctrl)
         self._build_intraday_charts(ctrl)
 
         btn_frame = ttk.Frame(ctrl)
-        btn_frame.grid(row=0, column=1, **pad)
+        btn_frame.grid(row=0, column=2, **pad)
 
         self.run_btn = self._action_btn(
             btn_frame, "Run", width=10,
@@ -141,7 +166,7 @@ class PnLApp:
         self.status_var = tk.StringVar(value="Ready.")
         ttk.Label(ctrl, textvariable=self.status_var,
                   foreground="gray").grid(
-            row=1, column=1, **pad)
+            row=1, column=2, **pad)
 
         self.result_vars = {
             "UBS": tk.StringVar(value="—"),
@@ -150,7 +175,7 @@ class PnLApp:
         }
 
         fields = ttk.LabelFrame(ctrl, text="", padding=(12, 6))
-        fields.grid(row=2, column=1, pady=(0, 12))
+        fields.grid(row=2, column=2, pady=(0, 12))
 
         self.pnl_labels = {}
         for col, (label_text, key) in enumerate(
@@ -164,32 +189,180 @@ class PnLApp:
             self.pnl_labels[key] = lbl
 
     def _build_etf_table(self, parent):
-        frame = ttk.LabelFrame(parent, text="ETF % from Highs", padding=(8, 6))
-        frame.grid(row=0, column=0, rowspan=3, sticky="nw", padx=(8, 16), pady=8)
+        self.etf_frame = ttk.LabelFrame(parent, text="ETF % from Highs", padding=(8, 6))
+        self.etf_frame.grid(row=0, column=0, rowspan=3, sticky="nw", padx=(8, 16), pady=8)
 
-        ttk.Label(frame, text="ETF", font=self._label_font,
+        ttk.Label(self.etf_frame, text="ETF", font=self._label_font,
                   anchor="center").grid(row=0, column=0, padx=8, pady=2)
-        ttk.Label(frame, text="6W High", font=self._label_font,
+        ttk.Label(self.etf_frame, text="6W High", font=self._label_font,
                   anchor="center").grid(row=0, column=1, padx=8, pady=2)
-        ttk.Label(frame, text="All-Time High", font=self._label_font,
+        ttk.Label(self.etf_frame, text="All-Time High", font=self._label_font,
                   anchor="center").grid(row=0, column=2, padx=8, pady=2)
 
         self.etf_vars = {}
         self.etf_labels = {}
         for i, tkr in enumerate(ETF_DRAWDOWN_TICKERS, start=1):
-            ttk.Label(frame, text=tkr, font=self._label_font,
+            ttk.Label(self.etf_frame, text=tkr, font=self._label_font,
                       anchor="center").grid(row=i, column=0, padx=8, pady=2)
             for col, key in enumerate(("6W", "ATH"), start=1):
                 v = tk.StringVar(value="—")
-                lbl = ttk.Label(frame, textvariable=v, font=self._label_font,
+                lbl = ttk.Label(self.etf_frame, textvariable=v, font=self._label_font,
                                 anchor="e", width=8)
                 lbl.grid(row=i, column=col, padx=8, pady=2)
                 self.etf_vars[(tkr, key)] = v
                 self.etf_labels[(tkr, key)] = lbl
 
+    def _build_custom_table(self, parent):
+        self.custom_tickers = _load_custom_tickers()
+        self.custom_vars = {}
+        self.custom_labels = {}
+        self.custom_entry_var = tk.StringVar()
+
+        self.custom_frame = ttk.LabelFrame(
+            parent, text="Custom % from Highs", padding=(8, 6))
+        self.custom_frame.grid(
+            row=0, column=1, rowspan=3, sticky="nw", padx=(0, 16), pady=8)
+
+        self._render_custom_table()
+
+    def _render_custom_table(self):
+        for w in self.custom_frame.winfo_children():
+            w.destroy()
+        self.custom_vars = {}
+        self.custom_labels = {}
+
+        ttk.Label(self.custom_frame, text="Ticker", font=self._label_font,
+                  anchor="center").grid(row=0, column=0, padx=8, pady=2)
+        ttk.Label(self.custom_frame, text="6W High", font=self._label_font,
+                  anchor="center").grid(row=0, column=1, padx=8, pady=2)
+        ttk.Label(self.custom_frame, text="All-Time High", font=self._label_font,
+                  anchor="center").grid(row=0, column=2, padx=8, pady=2)
+
+        for i, tkr in enumerate(self.custom_tickers, start=1):
+            ttk.Label(self.custom_frame, text=tkr, font=self._label_font,
+                      anchor="center").grid(row=i, column=0, padx=8, pady=2)
+            for col, key in enumerate(("6W", "ATH"), start=1):
+                v = tk.StringVar(value="—")
+                lbl = ttk.Label(self.custom_frame, textvariable=v,
+                                font=self._label_font, anchor="e", width=8)
+                lbl.grid(row=i, column=col, padx=8, pady=2)
+                self.custom_vars[(tkr, key)] = v
+                self.custom_labels[(tkr, key)] = lbl
+            del_lbl = ttk.Label(
+                self.custom_frame, text="×", font=self._label_font,
+                foreground="#b22222", cursor='hand2', anchor='center', width=2,
+            )
+            del_lbl.grid(row=i, column=3, padx=(2, 4), pady=2)
+            del_lbl.bind("<Button-1>",
+                         lambda _e, t=tkr: self._remove_custom_ticker(t))
+
+        last_row = len(self.custom_tickers)
+
+        # Add row appears only when there's room for another ticker
+        if len(self.custom_tickers) < MAX_CUSTOM_TICKERS:
+            add_row = last_row + 1
+            self.custom_entry_var.set("")
+            entry = ttk.Entry(self.custom_frame, textvariable=self.custom_entry_var,
+                              width=8, font=self._label_font)
+            entry.grid(row=add_row, column=0, padx=8, pady=2, sticky="ew")
+            entry.bind("<Return>", lambda _e: self._add_custom_ticker())
+            tk.Button(
+                self.custom_frame, text="Add", width=5,
+                command=self._add_custom_ticker,
+                font=self._label_font,
+                bg='#2d5a9e', fg='white',
+                activebackground='#3a6fbf', activeforeground='white',
+                relief='raised', bd=2, cursor='hand2',
+            ).grid(row=add_row, column=1, columnspan=3,
+                   padx=4, pady=2, sticky="w")
+            last_row = add_row
+
+        # Pad with empty rows so the pane height matches the ETF pane
+        # (header + MAX_CUSTOM_TICKERS rows)
+        for filler_row in range(last_row + 1, MAX_CUSTOM_TICKERS + 1):
+            ttk.Label(self.custom_frame, text=" ", font=self._label_font,
+                      anchor="center").grid(row=filler_row, column=0,
+                                            padx=8, pady=2)
+
+        # The Add row's Entry is taller than a Label, so the natural height
+        # exceeds the ETF pane. Pin the frame to the ETF pane's height.
+        self.root.after_idle(self._sync_custom_pane_height)
+
+    def _sync_custom_pane_height(self):
+        self.custom_frame.grid_propagate(True)
+        self.custom_frame.update_idletasks()
+        self.etf_frame.update_idletasks()
+        natural_w = self.custom_frame.winfo_reqwidth()
+        target_h = self.etf_frame.winfo_reqheight()
+        self.custom_frame.config(width=natural_w, height=target_h)
+        self.custom_frame.grid_propagate(False)
+
+    def _add_custom_ticker(self):
+        tkr = self.custom_entry_var.get().strip().upper()
+        if not tkr:
+            return
+        if tkr in self.custom_tickers:
+            self.status_var.set(f"{tkr} already in custom list")
+            return
+        if len(self.custom_tickers) >= MAX_CUSTOM_TICKERS:
+            return
+        self.status_var.set(f"Validating {tkr}...")
+        threading.Thread(
+            target=self._add_custom_ticker_worker, args=(tkr,), daemon=True
+        ).start()
+
+    def _add_custom_ticker_worker(self, tkr):
+        valid = validate_ticker(tkr)
+
+        def _finish():
+            if not valid:
+                self.status_var.set(f"Invalid ticker: {tkr}")
+                return
+            if tkr in self.custom_tickers:
+                return
+            if len(self.custom_tickers) >= MAX_CUSTOM_TICKERS:
+                return
+            self.custom_tickers.append(tkr)
+            _save_custom_tickers(self.custom_tickers)
+            self._render_custom_table()
+            self.status_var.set(f"Added {tkr}")
+            threading.Thread(
+                target=self._refresh_custom_drawdowns, daemon=True
+            ).start()
+
+        self.root.after(0, _finish)
+
+    def _remove_custom_ticker(self, tkr):
+        if tkr in self.custom_tickers:
+            self.custom_tickers.remove(tkr)
+            _save_custom_tickers(self.custom_tickers)
+            self._render_custom_table()
+
+    def _refresh_custom_drawdowns(self):
+        tickers = list(self.custom_tickers)
+        if not tickers:
+            return
+        dd = get_drawdowns(tickers)
+        self.root.after(0, lambda: self._update_custom_table(dd))
+
+    def _update_custom_table(self, dd):
+        for tkr, vals in dd.items():
+            for key in ("6W", "ATH"):
+                v = self.custom_vars.get((tkr, key))
+                lbl = self.custom_labels.get((tkr, key))
+                if v is None or lbl is None:
+                    continue
+                val = vals.get(key)
+                if val is None:
+                    v.set("—")
+                    lbl.config(foreground="gray")
+                else:
+                    v.set(f"{val * 100:+.2f}%")
+                    lbl.config(foreground=PNL_NEG_COLOR if val < 0 else PNL_POS_COLOR)
+
     def _build_intraday_charts(self, parent):
         frame = ttk.LabelFrame(parent, text="Intraday", padding=(8, 6))
-        frame.grid(row=0, column=2, rowspan=3, sticky="ne", padx=(8, 8), pady=8)
+        frame.grid(row=0, column=3, rowspan=3, sticky="ne", padx=(8, 8), pady=8)
 
         self.intraday_figs = {}
         self.intraday_axes = {}
@@ -384,6 +557,7 @@ class PnLApp:
 
             self.root.after(0, lambda: self.status_var.set("Fetching ETF highs..."))
             etf_dd = get_etf_drawdowns()
+            custom_dd = get_drawdowns(list(self.custom_tickers))
 
             self.root.after(0, lambda: self.status_var.set("Fetching intraday prices..."))
             intraday = get_intraday_prices()
@@ -401,6 +575,7 @@ class PnLApp:
                 self.pnl_labels['Total'].config(
                     foreground=PNL_POS_COLOR if total >= 0 else PNL_NEG_COLOR)
                 self._update_etf_table(etf_dd)
+                self._update_custom_table(custom_dd)
                 self._update_intraday_charts(intraday)
                 self.state.plot_df = df
                 self._redraw_scatter()

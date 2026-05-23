@@ -92,10 +92,25 @@ def get_etf_drawdowns():
 
     Result: {ticker: {"6W": decimal_or_None, "ATH": decimal_or_None}}
     """
-    with ThreadPoolExecutor(max_workers=4) as ex:
-        return dict(zip(
-            ETF_DRAWDOWN_TICKERS,
-            ex.map(_fetch_etf_drawdown, ETF_DRAWDOWN_TICKERS)))
+    return get_drawdowns(ETF_DRAWDOWN_TICKERS)
+
+
+def get_drawdowns(tickers):
+    """Generalized drawdown fetch for any ticker list."""
+    tickers = tuple(tickers)
+    if not tickers:
+        return {}
+    with ThreadPoolExecutor(max_workers=max(2, len(tickers))) as ex:
+        return dict(zip(tickers, ex.map(_fetch_etf_drawdown, tickers)))
+
+
+def validate_ticker(ticker):
+    """Return True if `ticker` has a usable last_price on yfinance."""
+    try:
+        last = yf.Ticker(ticker).fast_info.last_price
+        return last is not None and float(last) > 0
+    except Exception:
+        return False
 
 
 INTRADAY_TICKERS = ("SPY", "QQQ", "IWM")

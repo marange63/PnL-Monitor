@@ -35,7 +35,7 @@ Daily portfolio PnL monitor covering a UBS brokerage account and a UBS 401k acco
 | File | Contents |
 |---|---|
 | `constants.py` | Named constants: colors, intervals, sizing |
-| `data.py` | `get_price_data(ticker)`, `load_and_compute(status_cb)`, `get_etf_drawdowns()`, `get_intraday_prices()` |
+| `data.py` | `get_price_data(ticker)`, `load_and_compute(status_cb)`, `get_etf_drawdowns()`, `get_drawdowns(tickers)`, `validate_ticker(ticker)`, `get_intraday_prices()` |
 | `charts.py` | `draw_scatter`, `draw_bar`, `draw_treemap`, `build_grouped_scatter_df`, `build_bar_df`, `build_tag_bar_df`, `dollar_fmt`, `pct_fmt` |
 | `app.py` | `AppState` dataclass, `PnLApp` class (controls, four chart panes, tooltips, auto-update loop) |
 | `main.py` | Entry point — `Tk()` + `sv_ttk.set_theme("light")` + `PnLApp(root)` |
@@ -45,6 +45,8 @@ Daily portfolio PnL monitor covering a UBS brokerage account and a UBS 401k acco
 ### Top control strip
 Run · Auto Update (60 s loop; button relabels to `Stop (Ns)` with live countdown) · Log X axis · Group Tickers · Return % · Sort A–Z · Export CSV · status label · PnL summary (UBS / 401K / Total — values color-coded green/red).
 Three intraday thumbnail charts for SPY, QQQ, and IWM sit to the right of the buttons (1-min bars, `period="1d"`). Y-axis is **% return vs previous close** with a shared y-range across both charts; line is drawn as a `LineCollection` so each segment is colored green or red by the sign of its midpoint; dotted gray line marks 0%; title shows ticker + current % move, colored by sign of latest value.
+
+The **ETF % from Highs** table sits in column 0, with the **Custom % from Highs** table immediately to its right. Both share the same `_fetch_etf_drawdown` cache (keyed per ticker; highs refreshed once per calendar day, bumped up if `last_price` exceeds the cached high). Custom table holds up to `MAX_CUSTOM_TICKERS` (=4) user-chosen tickers with per-row `×` delete buttons and an Add entry + button (disabled when full). On Add: ticker is validated via `validate_ticker()` on a worker thread, then drawdowns are fetched async and rendered. List persists to `custom_tickers.json` in the project dir.
 
 ### Toggle interaction matrix
 | Toggle | Scatter | Treemap | Ticker bar | Tag bar |
