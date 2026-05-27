@@ -1,13 +1,15 @@
 import matplotlib.pyplot as plt
+import pandas as pd
 import squarify
+from matplotlib.axes import Axes
 
-from constants import SOURCE_COLORS, MULTI_SOURCE_COLOR, PNL_POS_COLOR, PNL_NEG_COLOR
+from constants import Col, SOURCE_COLORS, MULTI_SOURCE_COLOR, PNL_POS_COLOR, PNL_NEG_COLOR
 
 dollar_fmt = plt.FuncFormatter(lambda x, _: f"${x:,.0f}")
 pct_fmt = plt.FuncFormatter(lambda x, _: f"{x * 100:+.2f}%")
 
 
-def draw_treemap(ax, df, grouped=False):
+def draw_treemap(ax: Axes, df: pd.DataFrame, grouped: bool = False) -> tuple[list, pd.DataFrame]:
     """Draw a treemap sized by SOD VALUE, colored by % move (RdYlGn).
     Returns (rects, plot_data) for hover hit-testing, or ([], empty_df) if no data.
     """
@@ -15,21 +17,21 @@ def draw_treemap(ax, df, grouped=False):
     ax.set_axis_off()
 
     if grouped:
-        agg = (df.groupby('Ticker Alias').agg(
-                PnL=('PnL', 'sum'),
-                SOD_VALUE=('SOD VALUE', 'sum'),
+        agg = (df.groupby(Col.TICKER).agg(
+                PnL=(Col.PNL, 'sum'),
+                SOD_VALUE=(Col.SOD_VALUE, 'sum'),
             ).reset_index()
-              .rename(columns={'SOD_VALUE': 'SOD VALUE'}))
-        agg['pct_move'] = agg['PnL'] / agg['SOD VALUE']
+              .rename(columns={'SOD_VALUE': Col.SOD_VALUE}))
+        agg['pct_move'] = agg[Col.PNL] / agg[Col.SOD_VALUE]
         plot_data = agg
     else:
-        plot_data = (df[['Ticker Alias', 'SOD VALUE', 'PnL', '% Move On Day']]
+        plot_data = (df[[Col.TICKER, Col.SOD_VALUE, Col.PNL, Col.PCT_MOVE]]
                      .dropna()
-                     .rename(columns={'% Move On Day': 'pct_move'})
+                     .rename(columns={Col.PCT_MOVE: 'pct_move'})
                      .reset_index(drop=True))
 
-    plot_data = (plot_data[plot_data['PnL'].notna()]
-                 .assign(abs_pnl=lambda d: d['PnL'].abs())
+    plot_data = (plot_data[plot_data[Col.PNL].notna()]
+                 .assign(abs_pnl=lambda d: d[Col.PNL].abs())
                  .query('abs_pnl > 0')
                  .sort_values('abs_pnl', ascending=False)
                  .reset_index(drop=True))
@@ -50,7 +52,7 @@ def draw_treemap(ax, df, grouped=False):
             facecolor=color, edgecolor='white', linewidth=1.5, zorder=1))
         if min(rect['dx'], rect['dy']) > fig_w * 0.06:
             ax.text(rect['x'] + rect['dx'] / 2, rect['y'] + rect['dy'] / 2,
-                    f"{row['Ticker Alias']}\n{row['pct_move'] * 100:+.1f}%",
+                    f"{row[Col.TICKER]}\n{row['pct_move'] * 100:+.1f}%",
                     ha='center', va='center', fontsize=7, fontweight='bold',
                     color='black', clip_on=True, zorder=2)
 
@@ -62,38 +64,39 @@ def draw_treemap(ax, df, grouped=False):
     return rects, plot_data.reset_index(drop=True)
 
 
-def build_grouped_scatter_df(df):
+def build_grouped_scatter_df(df: pd.DataFrame) -> pd.DataFrame:
     """Collapse per-position rows into one row per Ticker Alias, summing PnL and SOD VALUE."""
-    agg = df.groupby('Ticker Alias').agg(
-        PnL=('PnL', 'sum'),
-        SOD_VALUE=('SOD VALUE', 'sum'),
-        Sources=('Source', lambda x: ', '.join(sorted(x.unique())))
+    agg = df.groupby(Col.TICKER).agg(
+        PnL=(Col.PNL, 'sum'),
+        SOD_VALUE=(Col.SOD_VALUE, 'sum'),
+        Sources=(Col.SOURCE, lambda x: ', '.join(sorted(x.unique())))
     ).reset_index()
-    agg = agg.rename(columns={'SOD_VALUE': 'SOD VALUE'})
-    agg['Return'] = agg['PnL'] / agg['SOD VALUE']
+    agg = agg.rename(columns={'SOD_VALUE': Col.SOD_VALUE})
+    agg['Return'] = agg[Col.PNL] / agg[Col.SOD_VALUE]
     return agg
 
 
-def draw_scatter(ax, df, log_x=False, grouped=False, return_mode=False):
+def draw_scatter(ax: Axes, df: pd.DataFrame, log_x: bool = False,
+                 grouped: bool = False, return_mode: bool = False) -> pd.DataFrame:
     """Draw scatter plot. Returns the DataFrame that was plotted (may be grouped)."""
     ax.clear()
     if grouped:
         plot_data = build_grouped_scatter_df(df)
-        y_vals = plot_data['Return'] if return_mode else plot_data['PnL']
+        y_vals = plot_data['Return'] if return_mode else plot_data[Col.PNL]
         colors = plot_data['Sources'].apply(
             lambda s: SOURCE_COLORS.get(s, MULTI_SOURCE_COLOR))
-        ax.scatter(plot_data['SOD VALUE'], y_vals, c=colors,
+        ax.scatter(plot_data[Col.SOD_VALUE], y_vals, c=colors,
                    alpha=0.7, edgecolors='white', linewidths=0.5)
-        for ticker, sod, y in zip(plot_data['Ticker Alias'], plot_data['SOD VALUE'], y_vals):
+        for ticker, sod, y in zip(plot_data[Col.TICKER], plot_data[Col.SOD_VALUE], y_vals):
             ax.annotate(ticker, (sod, y), fontsize=8.5, fontweight='bold',
                         textcoords="offset points", xytext=(4, 4))
     else:
         plot_data = df
-        y_vals = df['% Move On Day'] if return_mode else df['PnL']
-        colors = df['Source'].map(SOURCE_COLORS)
-        ax.scatter(df['SOD VALUE'], y_vals, c=colors, alpha=0.7,
+        y_vals = df[Col.PCT_MOVE] if return_mode else df[Col.PNL]
+        colors = df[Col.SOURCE].map(SOURCE_COLORS)
+        ax.scatter(df[Col.SOD_VALUE], y_vals, c=colors, alpha=0.7,
                    edgecolors='white', linewidths=0.5)
-        for ticker, sod, y in zip(df['Ticker Alias'], df['SOD VALUE'], y_vals):
+        for ticker, sod, y in zip(df[Col.TICKER], df[Col.SOD_VALUE], y_vals):
             ax.annotate(ticker, (sod, y), fontsize=8.5, fontweight='bold',
                         textcoords="offset points", xytext=(4, 4))
     ax.set_facecolor('white')
@@ -115,7 +118,8 @@ def draw_scatter(ax, df, log_x=False, grouped=False, return_mode=False):
     return plot_data.reset_index(drop=True)
 
 
-def build_bar_df(df, sort_by_name=False, grouped=True, return_mode=False):
+def build_bar_df(df: pd.DataFrame, sort_by_name: bool = False,
+                 grouped: bool = True, return_mode: bool = False) -> pd.DataFrame:
     """Build the DataFrame for the bar chart.
 
     grouped=True  → one bar per Ticker Alias (values summed across sources)
@@ -125,18 +129,18 @@ def build_bar_df(df, sort_by_name=False, grouped=True, return_mode=False):
     """
     if grouped:
         bar_df = (
-            df[['Ticker Alias', 'PnL', 'SOD VALUE']]
+            df[[Col.TICKER, Col.PNL, Col.SOD_VALUE]]
             .dropna()
-            .groupby('Ticker Alias', as_index=False)
-            .agg({'PnL': 'sum', 'SOD VALUE': 'sum'})
+            .groupby(Col.TICKER, as_index=False)
+            .agg({Col.PNL: 'sum', Col.SOD_VALUE: 'sum'})
         )
-        bar_df['Label'] = bar_df['Ticker Alias']
-        bar_df['Source'] = None
-        bar_df['Value'] = bar_df['PnL'] / bar_df['SOD VALUE'] if return_mode else bar_df['PnL']
+        bar_df['Label'] = bar_df[Col.TICKER]
+        bar_df[Col.SOURCE] = None
+        bar_df['Value'] = bar_df[Col.PNL] / bar_df[Col.SOD_VALUE] if return_mode else bar_df[Col.PNL]
     else:
-        bar_df = df[['Ticker Alias', 'Source', 'PnL', 'SOD VALUE', '% Move On Day']].dropna().copy()
-        bar_df['Label'] = bar_df['Ticker Alias'] + ' (' + bar_df['Source'] + ')'
-        bar_df['Value'] = bar_df['% Move On Day'] if return_mode else bar_df['PnL']
+        bar_df = df[[Col.TICKER, Col.SOURCE, Col.PNL, Col.SOD_VALUE, Col.PCT_MOVE]].dropna().copy()
+        bar_df['Label'] = bar_df[Col.TICKER] + ' (' + bar_df[Col.SOURCE] + ')'
+        bar_df['Value'] = bar_df[Col.PCT_MOVE] if return_mode else bar_df[Col.PNL]
 
     if sort_by_name:
         bar_df = bar_df.sort_values('Label', ascending=False)
@@ -145,16 +149,16 @@ def build_bar_df(df, sort_by_name=False, grouped=True, return_mode=False):
     return bar_df.reset_index(drop=True)
 
 
-def build_tag_bar_df(df, sort_by_name=False):
+def build_tag_bar_df(df: pd.DataFrame, sort_by_name: bool = False) -> pd.DataFrame:
     """Group PnL by Tag. Always grouped; ignores Group Tickers toggle."""
     bar_df = (
-        df[['Tag', 'PnL']]
+        df[[Col.TAG, Col.PNL]]
         .dropna()
-        .groupby('Tag', as_index=False)
-        .agg({'PnL': 'sum'})
+        .groupby(Col.TAG, as_index=False)
+        .agg({Col.PNL: 'sum'})
     )
-    bar_df['Label'] = bar_df['Tag']
-    bar_df['Value'] = bar_df['PnL']
+    bar_df['Label'] = bar_df[Col.TAG]
+    bar_df['Value'] = bar_df[Col.PNL]
     if sort_by_name:
         bar_df = bar_df.sort_values('Label', ascending=False)
     else:
@@ -162,7 +166,7 @@ def build_tag_bar_df(df, sort_by_name=False):
     return bar_df.reset_index(drop=True)
 
 
-def draw_bar(ax_bar, bar_df, return_mode=False):
+def draw_bar(ax_bar: Axes, bar_df: pd.DataFrame, return_mode: bool = False) -> None:
     bar_colors = [PNL_NEG_COLOR if v < 0 else PNL_POS_COLOR for v in bar_df['Value']]
     ax_bar.clear()
     ax_bar.barh(bar_df['Label'], bar_df['Value'], color=bar_colors,

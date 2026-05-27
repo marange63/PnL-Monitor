@@ -1,87 +1,109 @@
 # PnL-Monitor
 
-## Project Overview
-Daily portfolio PnL monitor covering a UBS brokerage account and a UBS 401k account. Pulls live holdings from `claudedev_shared`, enriches with real-time Yahoo Finance prices, computes intraday P&L per position and in aggregate, and displays everything in a tkinter GUI with live charts.
+## Overview
+Tkinter desktop app that monitors intraday P&L across a UBS brokerage and UBS 401k account. Holdings come from `claudedev_shared`; prices come from Yahoo Finance via `yfinance`. Charts redraw on demand or on a 60 s auto-update loop.
 
 ## Environment
-- **Conda env:** `PnL-Monitor` (`C:\Users\wamfo\anaconda3\envs\PnL-Monitor`) — always use this, not system Python
-- **Python interpreter:** `C:\Users\wamfo\anaconda3\envs\PnL-Monitor\python.exe`
-- **IDE:** PyCharm
-- **GitHub:** https://github.com/marange63/PnL-Monitor (branch: `main`)
-- **Deps:** `environment.yml` (Python 3.13) — `claudedev_shared`, `yfinance>=1.2.0`, `pandas>=2.3.0`, `matplotlib>=3.10.0`, `squarify>=0.4.3`, `sv-ttk>=2.6.0`
-- **Launchers:** `main.py` (entry point: sets `sv_ttk` light theme, instantiates `PnLApp`); `Launch PnL Monitor.bat` for double-click launch from Explorer (uses env's `pythonw.exe` — no console). User-facing docs in `MANUAL.md`.
+- **Conda env:** `PnL-Monitor` — interpreter `C:\Users\wamfo\anaconda3\envs\PnL-Monitor\python.exe`. Never use system Python.
+- **Deps:** `environment.yml` (Python 3.13). pip pins are `>=X.Y,<X+1.0`: `yfinance`, `pandas`, `matplotlib`, `squarify`, `sv-ttk`, `claudedev_shared`, `pytest`.
+- **Launch:** `main.py` (configures logging + `sv_ttk` light theme + `PnLApp`). `Launch PnL Monitor.bat` uses `pythonw.exe` for console-less double-click launch. User docs in `MANUAL.md`.
+- **GitHub:** https://github.com/marange63/PnL-Monitor (branch `main`).
 
-## Data Sources
-- `ubs_live_price_holdings()` / `ubs_401k_holdings()` — from `claudedev_shared`; both return a DataFrame with `DESCRIPTION`, `SYMBOL`, `SOD VALUE`, `Ticker Alias`, `Tag`, `Source`
-- yfinance `fast_info`: use `last_price` and `regular_market_previous_close` (**not** `previous_close`, which includes after-hours)
-- Price fetches run concurrently via `ThreadPoolExecutor(max_workers=5)` with a single retry on exception (0.5 s backoff); failed tickers yield `(None, None, None)`.
-- **Stock-split auto-detection** (`_detect_split_ratio` in `data.py`): if `last_price / last_close < 0.35`, treats it as a split and divides `last_close` by `round(1/ratio)` before computing `% Move On Day`. Prints a notice when applied.
+## Data Pipeline
+- `ubs_live_price_holdings()` + `ubs_401k_holdings()` return DataFrames with `DESCRIPTION`, `SYMBOL`, `SOD VALUE`, `Ticker Alias`, `Tag`, `Source`.
+- Prices via `yf.Ticker(t).fast_info` — use `last_price` and `regular_market_previous_close` (**not** `previous_close`, which includes after-hours).
+- `load_and_compute()` concatenates both sources, fetches prices in parallel (`ThreadPoolExecutor(max_workers=5)`, one retry with 0.5 s backoff, failed tickers yield `(None, None, None)`), then fills `Last Price`, `Last Close`, `% Move On Day`, `PnL`.
+- **Split auto-detect** (`_detect_split_ratio`): if `last_price / last_close < 0.35`, divide `last_close` by `round(1/ratio)`. Logs `detected N:1 split` INFO line — check the log before chasing "too good" prices.
 
-## DataFrame Columns (computed in `data.py`)
-| Column | Description |
+## DataFrame Schema
+Reference columns through `constants.Col` — never string literals.
+
+| `Col.` attr | Column | Notes |
+|---|---|---|
+| `DESCRIPTION` | `DESCRIPTION` | Security full name |
+| `SYMBOL` | `SYMBOL` | Brokerage symbol |
+| `SOD_VALUE` | `SOD VALUE` | Start-of-day USD |
+| `TICKER` | `Ticker Alias` | Yahoo ticker |
+| `SOURCE` | `Source` | `"UBS"` or `"401K"` |
+| `TAG` | `Tag` | Sector/category |
+| `LAST_PRICE` | `Last Price` | from yfinance |
+| `LAST_CLOSE` | `Last Close` | split-adjusted if detected |
+| `PCT_MOVE` | `% Move On Day` | **decimal**, e.g. `0.0179` = 1.79% |
+| `PNL` | `PnL` | `SOD VALUE * PCT_MOVE` |
+
+## Modules
+| File | Role |
 |---|---|
-| `DESCRIPTION` | Security full name |
-| `SYMBOL` | Brokerage symbol |
-| `SOD VALUE` | Start-of-day USD value |
-| `Ticker Alias` | Yahoo Finance ticker |
-| `Source` | `"UBS"` or `"401K"` |
-| `Tag` | Sector/category tag; used by tag bar chart |
-| `Last Price` | Current price from yfinance |
-| `Last Close` | `regular_market_previous_close` |
-| `% Move On Day` | `(Last Price - Last Close) / Last Close` — decimal, e.g. 0.0179 = 1.79% |
-| `PnL` | `SOD VALUE * % Move On Day` |
-
-## Module Structure
-| File | Contents |
-|---|---|
-| `constants.py` | Named constants: colors, intervals, sizing |
-| `data.py` | `get_price_data(ticker)`, `load_and_compute(status_cb)`, `get_etf_drawdowns()`, `get_drawdowns(tickers)`, `validate_ticker(ticker)`, `get_intraday_prices()` |
-| `charts.py` | `draw_scatter`, `draw_bar`, `draw_treemap`, `build_grouped_scatter_df`, `build_bar_df`, `build_tag_bar_df`, `dollar_fmt`, `pct_fmt` |
-| `app.py` | `AppState` dataclass, `PnLApp` class (controls, four chart panes, tooltips, auto-update loop) |
-| `main.py` | Entry point — `Tk()` + `sv_ttk.set_theme("light")` + `PnLApp(root)` |
+| `main.py` | Entry point: logging, theme, `PnLApp` |
+| `app.py` | `PnLApp` — wires control strip, panes, and `RunLoop`; owns toggle vars; persists custom tickers to `custom_tickers.json` (`MAX_CUSTOM_TICKERS = 4`) |
+| `run_loop.py` | `RunLoop` — worker thread + auto-update timer + countdown tick; calls `on_result(RunResult)` on main thread |
+| `data.py` | `load_and_compute`, `get_price_data`, `validate_ticker`, `get_default_drawdowns`, `get_drawdowns`, `get_intraday_prices`, `HighCache`; `DEFAULT_TICKERS`, `INTRADAY_TICKERS` |
+| `charts.py` | `draw_scatter`/`draw_bar`/`draw_treemap` + their `build_*_df` companions; `dollar_fmt`, `pct_fmt` |
+| `constants.py` | `Col`, color palette, button colors, sizing/timing constants |
+| `drawdown_table.py` | `DrawdownTable` — ticker/6W/ATH table (+ optional Today column via `show_today`); editable variant adds × delete labels, Add row, async validation, height-sync to sibling |
+| `bar_chart_pane.py` | `ScrollableBarChart` — debounced resize, mousewheel scroll, hover; used for both ticker bar and tag bar |
+| `intraday_panel.py` | `IntradayChartGrid` — row of % return vs prev-close thumbnails, shared y-range, segment-colored `LineCollection` |
+| `scatter_pane.py` | `ScatterPane` — SOD vs PnL/Return, hover + log-X toggle |
+| `treemap_pane.py` | `TreemapPane` — \|PnL\|-sized tiles, sign-colored, 150 ms debounced resize |
+| `tooltip.py` | `Tooltip` — singleton yellow floater shared by every pane |
 
 ## GUI Layout
 
-### Top control strip
-Run · Auto Update (60 s loop; button relabels to `Stop (Ns)` with live countdown) · Log X axis · Group Tickers · Return % · Sort A–Z · Export CSV · status label · PnL summary (UBS / 401K / Total — values color-coded green/red).
-Three intraday thumbnail charts for SPY, QQQ, and IWM sit to the right of the buttons (1-min bars, `period="1d"`). Y-axis is **% return vs previous close** with a shared y-range across both charts; line is drawn as a `LineCollection` so each segment is colored green or red by the sign of its midpoint; dotted gray line marks 0%; title shows ticker + current % move, colored by sign of latest value.
+### Control strip (row 0)
+Col 0 **ETF % from Highs** (SPY/QQQ/IWM/EEM) · Col 1 **Custom % from Highs** (up to 4 user tickers with × delete + Add row that only appears when count < 4; shows extra **Today** column) · Col 2 buttons + status + PnL summary · Col 3 **Intraday** thumbnails (SPY/QQQ/IWM, 1-min `period="1d"`).
 
-The **ETF % from Highs** table sits in column 0, with the **Custom % from Highs** table immediately to its right. Both share the same `_fetch_etf_drawdown` cache (keyed per ticker; highs refreshed once per calendar day, bumped up if `last_price` exceeds the cached high). Custom table holds up to `MAX_CUSTOM_TICKERS` (=4) user-chosen tickers with per-row `×` delete buttons and an Add entry + button (disabled when full). On Add: ticker is validated via `validate_ticker()` on a worker thread, then drawdowns are fetched async and rendered. List persists to `custom_tickers.json` in the project dir.
+Buttons: **Run** · **Auto Update** (60 s loop; label becomes `Stop (Ns)` with live countdown) · **Log X** · **Group Tickers** · **Return %** · **Sort A–Z** · **Export CSV**. PnL summary shows UBS / 401K / Total, green/red by sign.
 
-### Toggle interaction matrix
+Intraday y-axis is **% return vs prev close** with a shared y-range across all three charts. Each chart is a `LineCollection` whose segments are colored by sign of midpoint; dotted gray 0% line; title color tracks sign of latest value.
+
+ETF and Custom tables share a single `HighCache` (highs cached per calendar day; `bump`ed up if `last_price` overshoots). Custom pane's height is pinned to ETF's via `grid_propagate(False)` so they stay aligned.
+
+### Keyboard
+`F5` Run · `Ctrl+A` toggle Auto Update · `Ctrl+S` Export CSV
+
+### Panes (row 1, `ttk.PanedWindow`, horizontal)
+Order and initial weights: **treemap (7) | scatter (9) | ticker bar (6) | tag bar (7)**.
+
+- **Treemap** — tiles sized by `abs(PnL)`, flat green/red by sign of `% move`; label hidden when `min(dx,dy) ≤ fig_w * 0.06`; y-axis inverted (squarify origin is upper-left).
+- **Scatter** — X=SOD, Y=PnL or Return; UBS blue, 401K orange, multi-source purple (`#9467bd`).
+- **Ticker bar** — `ScrollableBarChart`, row 0.28 in, min 3.0 in, resize debounced 50 ms.
+- **Tag bar** — same widget fed by `build_tag_bar_df`; always grouped by `Tag`; ignores Group Tickers and Return % toggles.
+
+### Toggle matrix
 | Toggle | Scatter | Treemap | Ticker bar | Tag bar |
 |---|---|---|---|---|
-| **Log X axis** | x-axis scale | — | — | — |
-| **Group Tickers** | grouped dots | grouped tiles | grouped bars | always grouped |
-| **Return %** | Y axis | — | X axis | — |
-| **Sort A–Z** | — | — | sort order | sort order |
-
-### Bottom panes — `ttk.PanedWindow` (horizontal, resizable)
-Pane order and initial weights: **treemap (7) | scatter (9) | ticker bar (6) | tag bar (7)**
-
-- **Treemap** — tiles sized by `abs(PnL)`, colored flat green/red by sign of `% move` (`PNL_POS_COLOR` / `PNL_NEG_COLOR`); labels show ticker + `±N.N%`, hidden if `min(dx,dy) ≤ fig_w * 0.06`; y-axis is inverted (squarify uses upper-left origin); redraws on resize with 150 ms debounce
-- **Scatter** — X: SOD VALUE, Y: PnL or Return; UBS=blue, 401K=orange, multi-source=purple (`#9467bd`); hover shows source breakdown in grouped mode
-- **Ticker bar** — scrollable horizontal bar chart; row height 0.28 in, min 3.0 in; bar resize debounced 50 ms; hover shows description + % move
-- **Tag bar** — same layout as ticker bar; always grouped by `Tag`; ignores Group Tickers and Return % toggles; hover shows tickers, symbols, SOD VALUE, PnL for the tag
+| Log X | x-scale | — | — | — |
+| Group Tickers | grouped dots | grouped tiles | grouped bars | always grouped |
+| Return % | Y axis | — | X axis | — |
+| Sort A–Z | — | — | order | order |
 
 ## Key Contracts
-- `build_bar_df(df, sort_by_name, grouped, return_mode)` → always has `Label`, `Source`, `Value` columns; `draw_bar` is shared for both bar charts
-- `build_tag_bar_df(df, sort_by_name)` → has `Label`, `Tag`, `Value`; no `return_mode`
-- `build_grouped_scatter_df(df)` → one row per `Ticker Alias` with summed `PnL`, summed `SOD VALUE`, comma-joined `Sources`, and a `Return` column
-- `draw_scatter(ax, df, log_x, grouped, return_mode)` → returns the DataFrame that was plotted (grouped or per-position); stored as `state.scatter_df` for hover + CSV export
-- `draw_treemap(ax, df, grouped)` → returns `(rects, plot_data)`; `rects` are squarify dicts with `x, y, dx, dy` used for hover hit-testing
-- `get_price_data(ticker)` → `(last_price, last_close, pct_move)` or `(None, None, None)`; transparently adjusts `last_close` for detected splits
-- `load_and_compute(status_cb=None)` → concatenates UBS + 401K holdings, fetches prices in parallel, fills `Last Price`, `Last Close`, `% Move On Day`, `PnL`; `status_cb` receives stage labels for the status bar
+- `load_and_compute(status_cb=None) -> DataFrame` — fills price/PnL columns; `status_cb(stage)` drives the status bar.
+- `get_price_data(ticker) -> (last_price, last_close, pct_move)` — `None`s on failure; transparently split-adjusts `last_close`.
+- `get_drawdowns(tickers) / get_default_drawdowns() -> {ticker: {"Today": dec|None, "6W": dec|None, "ATH": dec|None}}`.
+- `get_intraday_prices() -> {ticker: {"hist": DataFrame|None, "prev_close": float|None}}`.
+- `build_bar_df(df, sort_by_name, grouped, return_mode)` → always has `Label`, `Source`, `Value`. Shared by `draw_bar`.
+- `build_tag_bar_df(df, sort_by_name)` → `Label`, `Tag`, `Value` (no `return_mode`).
+- `build_grouped_scatter_df(df)` → one row per `Ticker Alias` with summed `PnL`, summed `SOD VALUE`, comma-joined `Sources`, and `Return`.
+- `draw_scatter(...)` returns the plotted DataFrame; `ScatterPane.scatter_df` holds it for hover + CSV export.
+- `draw_treemap(...)` returns `(rects, plot_data)`; `rects` are squarify dicts (`x, y, dx, dy`) used for hit-testing.
+- `RunLoop(...).run_once() / .toggle_auto()` — calls `on_result(RunResult(plot_df, etf_dd, custom_dd, intraday))` on the main thread.
 
-## Non-obvious Behavior / Gotchas
-- `% Move On Day` is a **decimal** (not ×100). `PnL = SOD VALUE * % Move On Day`.
-- All tkinter calls from background threads must go through `root.after(0, ...)` — both `_run_worker` and `_auto_worker` rely on this.
-- Bar resize: `bar_canvas_widget.config(width=w, height=h_px)` triggers matplotlib's `<Configure>` handler (recreates `_tkphoto`). Do **not** unbind it. Always also call `bar_canvas.draw()` explicitly — needed when size is unchanged (e.g., sort toggle).
+## Gotchas
+- `PCT_MOVE` is a **decimal**, not %×100. `PnL = SOD VALUE * PCT_MOVE`.
+- Every tkinter call from a worker thread must go through `root.after(0, ...)` — `RunLoop._worker`, `DrawdownTable._add_worker`, `PnLApp._refresh_custom_drawdowns` all rely on this.
+- `ScrollableBarChart`: `_canvas_widget.config(width=w, height=h_px)` triggers matplotlib's `<Configure>` (recreates `_tkphoto`). Do **not** unbind it. Always call `_canvas.draw()` explicitly — needed even when size is unchanged (e.g. sort toggle).
 - Bar/tag bar hover uses `round(event.ydata)` for hit detection — `bar.contains(event)` is unreliable on Windows with DPI scaling.
-- Treemap hover iterates `state.treemap_rects` (squarify rect bounds); `state.treemap_df` holds the matching rows.
-- Auto-update: `toggle_auto` cancels both `auto_after_id` (next run) and `countdown_id` (per-second label tick) — both must be tracked separately on `AppState`.
-- Auto-detected stock splits silently rewrite `last_close` inside `get_price_data` — if a price looks "too good", check stdout for the `Note: detected N:1 split` line before assuming a bug.
+- Treemap hover iterates the rects from `draw_treemap`; matching rows live on `TreemapPane._df`.
+- `RunLoop.toggle_auto` must cancel **both** `_auto_after_id` (next run) and `_countdown_id` (per-second tick).
+- `HighCache.get_or_fetch` resolves `_fetch_highs` at call time (not as a default arg) so `patch.object(data, "_fetch_highs", ...)` works in tests.
+- Auto-detected splits silently rewrite `last_close` inside `get_price_data` — check the log for the INFO line before assuming a bug.
+
+## Tests
+`pytest tests/ -q`. Coverage:
+- `tests/test_data.py` — `_detect_split_ratio`, `HighCache`, `validate_ticker`, `_fetch_drawdown` (yfinance mocked).
+- `tests/test_charts.py` — `build_bar_df`, `build_grouped_scatter_df`, `build_tag_bar_df` against `sample_positions` in `conftest.py`.
 
 ## Git
-- Always include `.claude/` directory in commits.
+- Always include `.claude/` in commits.
 - Remote: https://github.com/marange63/PnL-Monitor.git
