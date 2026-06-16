@@ -200,11 +200,10 @@ def _fetch_intraday(ticker: str) -> dict:
     try:
         t = yf.Ticker(ticker)
         hist = t.history(period="1d", interval="1m", prepost=False)
-        prev_close = None
         try:
-            prev_close = float(t.fast_info.regular_market_previous_close)
+            prev_close = _previous_close(ticker, t.fast_info)
         except _PRICE_FETCH_ERRORS:
-            pass
+            prev_close = None
         if hist is None or hist.empty:
             return {"hist": None, "prev_close": prev_close}
         return {"hist": hist[["Close"]], "prev_close": prev_close}
