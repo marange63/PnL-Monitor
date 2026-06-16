@@ -4,7 +4,7 @@ import pandas as pd
 import pytest
 
 import data
-from data import HighCache, _detect_split_ratio, validate_ticker
+from data import HighCache, _detect_split_ratio, _previous_close, get_price_data, validate_ticker
 
 
 # ---------- _detect_split_ratio ----------
@@ -93,6 +93,73 @@ def test_validate_ticker_returns_false_on_exception():
     with patch.object(data, "yf") as yf_mock:
         yf_mock.Ticker.side_effect = KeyError("bogus")
         assert validate_ticker("NOTAREAL") is False
+
+
+# ---------- _previous_close ----------
+
+def test_previous_close_uses_fast_info_when_populated():
+    fast_info = MagicMock(regular_market_previous_close=185.5)
+    with patch.object(data, "yf") as yf_mock:
+        assert _previous_close("AAPL", fast_info) == 185.5
+    yf_mock.Ticker.assert_not_called()  # no fallback HTTP call
+
+
+def test_previous_close_falls_back_to_intraday_when_nan():
+    fast_info = MagicMock(regular_market_previous_close=float("nan"),
+                          previous_close=999.0)
+    today = pd.Timestamp.today().normalize()
+    yesterday = today - pd.Timedelta(days=1)
+    # 1-min intraday across yesterday + today; last yesterday bar = 296.42
+    intraday = pd.DataFrame(
+        {"Close": [292.0, 296.42, 295.5, 299.5]},
+        index=pd.DatetimeIndex([
+            yesterday + pd.Timedelta(hours=9, minutes=30),
+            yesterday + pd.Timedelta(hours=15, minutes=59),
+            today + pd.Timedelta(hours=9, minutes=30),
+            today + pd.Timedelta(hours=12),
+        ]),
+    )
+    with patch.object(data, "yf") as yf_mock:
+        yf_mock.Ticker.return_value.history.return_value = intraday
+        assert _previous_close("AAPL", fast_info) == 296.42  # not 999.0
+
+
+def test_previous_close_falls_back_to_previous_close_when_intraday_empty():
+    fast_info = MagicMock(regular_market_previous_close=float("nan"),
+                          previous_close=296.36)
+    with patch.object(data, "yf") as yf_mock:
+        yf_mock.Ticker.return_value.history.return_value = pd.DataFrame()
+        assert _previous_close("AAPL", fast_info) == 296.36
+
+
+def test_previous_close_returns_none_when_all_sources_nan():
+    fast_info = MagicMock(regular_market_previous_close=float("nan"),
+                          previous_close=float("nan"))
+    with patch.object(data, "yf") as yf_mock:
+        yf_mock.Ticker.return_value.history.return_value = pd.DataFrame()
+        assert _previous_close("AAPL", fast_info) is None
+
+
+# ---------- get_price_data NaN guard ----------
+
+def test_get_price_data_returns_none_silently_on_nan_last_price(caplog):
+    fast_info = MagicMock(last_price=float("nan"),
+                          regular_market_previous_close=100.0)
+    with patch.object(data, "yf") as yf_mock, caplog.at_level("WARNING"):
+        yf_mock.Ticker.return_value.fast_info = fast_info
+        result = get_price_data("BROKEN")
+    assert result == (None, None, None)
+    assert caplog.records == []  # no noisy retry warning
+
+
+def test_fetch_drawdown_returns_all_none_on_nan_last_price():
+    data._high_cache.clear()
+    fast_info = MagicMock(last_price=float("nan"),
+                          regular_market_previous_close=100.0)
+    with patch.object(data, "yf") as yf_mock:
+        yf_mock.Ticker.return_value.fast_info = fast_info
+        dd = data._fetch_drawdown("BROKEN")
+    assert dd == {"Today": None, "6W": None, "ATH": None}
 
 
 # ---------- _fetch_drawdown ----------

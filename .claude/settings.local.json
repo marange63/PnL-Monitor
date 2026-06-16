@@ -38,7 +38,15 @@
       "Bash(npm show:*)",
       "Bash(C:/Users/wamfo/anaconda3/envs/PnL-Monitor/python.exe:*)",
       "Bash(dir *)",
-      "Bash(C:\\\\Users\\\\wamfo\\\\anaconda3\\\\envs\\\\PnL-Monitor\\\\python.exe *)"
+      "Bash(C:\\\\Users\\\\wamfo\\\\anaconda3\\\\envs\\\\PnL-Monitor\\\\python.exe *)",
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\wamfo\\\\ClaudeDev\\\\PnL-Monitor\" -Force)",
+      "Bash(Format-Table Name, PSIsContainer)",
+      "Bash(C:/Users/wamfo/AppData/Local/Temp/yftest/Scripts/python.exe -m pip install --quiet --upgrade pip)",
+      "Bash(C:/Users/wamfo/AppData/Local/Temp/yftest/Scripts/python.exe -m pip install --quiet \"yfinance==1.4.1\")",
+      "Bash(C:/Users/wamfo/AppData/Local/Temp/yftest/Scripts/python.exe -c \"import yfinance; print\\('installed yfinance', yfinance.__version__\\)\")",
+      "Bash(C:/Users/wamfo/AppData/Local/Temp/yftest/Scripts/python.exe *)",
+      "Bash(Remove-Item -Recurse -Force C:/Users/wamfo/AppData/Local/Temp/yftest)",
+      "Bash(Out-Null)"
     ]
   }
 }

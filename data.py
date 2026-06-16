@@ -32,12 +32,42 @@ def _detect_split_ratio(last_price: float, last_close: float) -> int:
 _PRICE_FETCH_ERRORS = (AttributeError, KeyError, ValueError, OSError)
 
 
+def _previous_close(ticker: str, fast_info) -> float | None:
+    """Regular-session previous close, with fallbacks when fast_info returns NaN.
+
+    Yahoo's v8/chart endpoint stopped exposing regularMarketPreviousClose for
+    most US equities in mid-2026, and the daily-history endpoint can be missing
+    yesterday's bar entirely (even at 1mo period) — so falling back to daily
+    history can pick a close 2+ trading days stale. The 1-minute intraday
+    endpoint reliably contains yesterday's full regular session; its last bar
+    before today is the prior regular-session close.
+    """
+    rmpc = fast_info.regular_market_previous_close
+    if not pd.isna(rmpc):
+        return float(rmpc)
+    today = pd.Timestamp.today().date()
+    intraday = yf.Ticker(ticker).history(
+        period="2d", interval="1m", prepost=False, auto_adjust=False)
+    if intraday is not None and not intraday.empty:
+        prior = intraday[intraday.index.date < today]
+        if not prior.empty:
+            return float(prior["Close"].iloc[-1])
+    # Last resort: previousClose (may include after-hours moves)
+    pc = fast_info.previous_close
+    return float(pc) if not pd.isna(pc) else None
+
+
 def get_price_data(ticker: str) -> PriceTuple:
     for attempt in range(2):
         try:
             data = yf.Ticker(ticker).fast_info
             last_price = data.last_price
-            last_close = data.regular_market_previous_close
+            if pd.isna(last_price):
+                return None, None, None
+            last_close = _previous_close(ticker, data)
+            if last_close is None:
+                log.warning("no previous close available for %s", ticker)
+                return None, None, None
             split_ratio = _detect_split_ratio(last_price, last_close)
             if split_ratio > 1:
                 last_close = last_close / split_ratio
@@ -108,12 +138,17 @@ def _fetch_drawdown(ticker: str) -> dict[str, float | None]:
     try:
         fast_info = yf.Ticker(ticker).fast_info
         last_price = fast_info.last_price
+        if pd.isna(last_price):
+            return {"Today": None, "6W": None, "ATH": None}
         try:
-            last_close = fast_info.regular_market_previous_close
-            split_ratio = _detect_split_ratio(last_price, last_close)
-            if split_ratio > 1:
-                last_close = last_close / split_ratio
-            today_pct = (last_price - last_close) / last_close
+            last_close = _previous_close(ticker, fast_info)
+            if last_close is None:
+                today_pct = None
+            else:
+                split_ratio = _detect_split_ratio(last_price, last_close)
+                if split_ratio > 1:
+                    last_close = last_close / split_ratio
+                today_pct = (last_price - last_close) / last_close
         except _PRICE_FETCH_ERRORS:
             today_pct = None
         today = pd.Timestamp.today().date()
