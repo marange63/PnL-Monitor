@@ -43,7 +43,7 @@ class DrawdownTable(ttk.LabelFrame):
         self._on_change = on_change
         self._on_added = on_added
         self._validator = validator
-        self._root = root
+        self._root_win = root
         self._status_cb = status_cb
 
         value_cols: list[tuple[str, str]] = []
@@ -136,8 +136,8 @@ class DrawdownTable(ttk.LabelFrame):
                 ttk.Label(self, text=" ", font=self._label_font,
                           anchor="center").grid(row=filler_row, column=0,
                                                 padx=8, pady=2)
-            if self._sibling_height and self._root:
-                self._root.after_idle(self._sync_height)
+            if self._sibling_height and self._root_win:
+                self._root_win.after_idle(self._sync_height)
 
     def _sync_height(self):
         self.grid_propagate(True)
@@ -183,8 +183,8 @@ class DrawdownTable(ttk.LabelFrame):
             if self._on_added:
                 self._on_added(tkr)
 
-        if self._root:
-            self._root.after(0, _finish)
+        if self._root_win:
+            self._root_win.after(0, _finish)
         else:
             _finish()
 
