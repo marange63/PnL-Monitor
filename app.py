@@ -113,7 +113,7 @@ class PnLApp:
 
         self.etf_table = DrawdownTable(
             ctrl, "ETF % from Highs", list(DEFAULT_TICKERS),
-            self._label_font, editable=False,
+            self._label_font, editable=False, show_today=True,
         )
         self.etf_table.grid(row=0, column=0, rowspan=3, sticky="nw",
                             padx=(8, 16), pady=8)
