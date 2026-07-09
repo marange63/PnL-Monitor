@@ -193,7 +193,7 @@ def validate_ticker(ticker: str) -> bool:
         return False
 
 
-INTRADAY_TICKERS = ("SPY", "QQQ", "SMH")
+INTRADAY_TICKERS = ("COST", "QQQ", "SMH")
 
 
 def _fetch_intraday(ticker: str) -> dict:
