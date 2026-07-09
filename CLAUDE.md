@@ -50,7 +50,7 @@ Reference columns through `constants.Col` — never string literals.
 ## GUI Layout
 
 ### Control strip (row 0)
-Col 0 **ETF % from Highs** (SPY/QQQ/IWM/EEM) · Col 1 **Custom % from Highs** (up to 4 user tickers with × delete + Add row that only appears when count < 4; shows extra **Today** column) · Col 2 buttons + status + PnL summary · Col 3 **Intraday** thumbnails (SPY/QQQ/SMH, 1-min `period="1d"`).
+Col 0 **ETF % from Highs** (SPY/QQQ/IWM/EEM) · Col 1 **Custom % from Highs** (up to 4 user tickers with × delete + Add row that only appears when count < 4; shows extra **Today** column) · Col 2 buttons + status + PnL summary · Col 3 **Intraday** thumbnails (COST/QQQ/SMH, 1-min `period="1d"`).
 
 Buttons: **Run** · **Auto Update** (60 s loop; label becomes `Stop (Ns)` with live countdown) · **Log X** · **Group Tickers** · **Return %** · **Sort A–Z** · **Export CSV**. PnL summary shows UBS / 401K / Total, green/red by sign.
 
