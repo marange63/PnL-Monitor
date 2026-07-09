@@ -71,14 +71,24 @@ class IntradayChartGrid(ttk.LabelFrame):
 
             x = mdates.date2num(idx.to_pydatetime())
             y = pct.to_numpy()
+
+            # Day high/low as % return; shade the band between them
+            high_pct = float(pct.max())
+            low_pct = float(pct.min())
+            ax.axhspan(low_pct, high_pct, color="gray", alpha=0.12, zorder=0)
+            ax.axhline(high_pct, color="gray", linestyle="-", linewidth=0.6,
+                       alpha=0.6, zorder=1)
+            ax.axhline(low_pct, color="gray", linestyle="-", linewidth=0.6,
+                       alpha=0.6, zorder=1)
+
             points = np.array([x, y]).T.reshape(-1, 1, 2)
             segments = np.concatenate([points[:-1], points[1:]], axis=1)
             seg_mid = (y[:-1] + y[1:]) / 2.0
             seg_colors = np.where(seg_mid >= 0, PNL_POS_COLOR, PNL_NEG_COLOR)
             ax.add_collection(LineCollection(segments, colors=seg_colors,
-                                             linewidth=1.2))
+                                             linewidth=1.2, zorder=2))
 
-            ax.axhline(0, color="gray", linestyle=":", linewidth=0.7)
+            ax.axhline(0, color="gray", linestyle=":", linewidth=0.7, zorder=1)
             ax.set_xlim(x[0], x[-1])
             ax.set_ylim(y_min, y_max)
             ax.set_title(f"{tkr}  {last_pct:+.2f}%", fontsize=9, color=title_color)
