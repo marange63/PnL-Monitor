@@ -105,6 +105,32 @@ Or from PyCharm: set the project interpreter to `C:\Users\wamfo\anaconda3\envs\P
 
 The application window opens in the Sun Valley light theme. No data is loaded on startup — click **Run** or **Auto Update** to begin.
 
+### 4.1 Scheduled PnL Notifications (ntfy)
+
+`notify_pnl.py` is a standalone, headless script (separate from the GUI) that computes Total PnL via `load_and_compute()` and pushes it to the [ntfy](https://ntfy.sh) topic `EwtinPnL-yfj58gdt`. Subscribe to that topic in the ntfy mobile app to receive the alerts.
+
+- **Message:** body `Total PnL: +$1,234.56` (up/down emoji tag by sign), title `PnL @ 1:45 PM ET`.
+- **Self-gating:** the script only sends on **weekdays, 09:30–16:30 America/New_York**. Runs outside that window exit silently, so stray or DST-shifted triggers are harmless.
+- **Manual test:** `python notify_pnl.py --force` bypasses the market-hours gate and sends immediately.
+
+**Windows Task Scheduler job** (`"PnL Notifier"`) drives it on a schedule:
+
+| Setting | Value |
+|---|---|
+| Trigger | Daily at 9:30 AM, repeating **every 15 min** for a **7-hour** duration (last run 4:30 PM) |
+| Action | `...\envs\PnL-Monitor\pythonw.exe notify_pnl.py` (console-less) |
+| Working dir | `C:\Users\wamfo\ClaudeDev\PnL-Monitor` |
+| Runs | Only while the user is logged on; missed runs catch up on wake (`StartWhenAvailable`) |
+
+The machine is on Eastern Time, so the 9:30 AM local trigger aligns with market open. Because the schedule lives in Windows Task Scheduler (not in the repo), recreate it after a machine migration. To inspect or change it:
+
+```powershell
+Get-ScheduledTask -TaskName "PnL Notifier" | Get-ScheduledTaskInfo   # status / next run
+Unregister-ScheduledTask -TaskName "PnL Notifier"                    # remove
+```
+
+> **Note:** ntfy.sh is a public server — anyone who knows the topic name can read these P&L figures. Keep the topic name private.
+
 ---
 
 ## 5. User Interface Guide
@@ -267,6 +293,7 @@ PnL-Monitor/
 ├── data.py          # Data loading, price fetching, PnL computation
 ├── charts.py        # All chart drawing and DataFrame building functions
 ├── constants.py     # Named constants (colors, intervals, sizing)
+├── notify_pnl.py    # Headless Total-PnL → ntfy notifier (Task Scheduler)
 ├── environment.yml  # Conda environment specification
 ├── CLAUDE.md        # Developer reference for AI-assisted development
 └── MANUAL.md        # This file
