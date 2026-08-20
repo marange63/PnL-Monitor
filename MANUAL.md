@@ -109,8 +109,10 @@ The application window opens in the Sun Valley light theme. No data is loaded on
 
 `notify_pnl.py` is a standalone, headless script (separate from the GUI) that computes Total PnL via `load_and_compute()` and pushes it to the [ntfy](https://ntfy.sh) topic `EwtinPnL-yfj58gdt`. Subscribe to that topic in the ntfy mobile app to receive the alerts.
 
-- **Message:** body `Total PnL: +$1,234.56` (up/down emoji tag by sign), title `PnL @ 1:45 PM ET`.
+- **Message:** body `Total PnL: +$1,234.56` followed by a `holdings 09:26` line, title `PnL @ 1:45 PM ET` (up/down emoji tag by sign).
 - **Self-gating:** the script only sends on **weekdays, 09:30–16:30 America/New_York**. Runs outside that window exit silently, so stray or DST-shifted triggers are harmless.
+- **Fresh holdings every run:** neither `load_and_compute()` nor the `claudedev_shared` loaders cache, and Task Scheduler starts a new process each time, so re-exporting `UBS_Holdings.csv` or `UBS 401K.csv` is picked up by the next run with no restart. The `holdings HH:MM` line reports the newer of the two files' modification times, so a forgotten re-export is visible rather than silent.
+- **Failure alerts:** if the holdings load or the price fetch raises (malformed or half-written CSV, missing file), the script posts a **`PnL notifier failed`** notification at high priority carrying the exception type and message, then exits `1`. A network failure during that alert is logged only, so it can never mask the original error.
 - **Manual test:** `python notify_pnl.py --force` bypasses the market-hours gate and sends immediately.
 
 **Windows Task Scheduler job** (`"PnL Notifier"`) drives it on a schedule:
@@ -411,7 +413,24 @@ The `claudedev_shared` package provides two functions:
 
 Both return DataFrames with columns: `DESCRIPTION`, `SYMBOL`, `SOD VALUE`, `Ticker Alias`, `Tag`, `Source`.
 
-The two DataFrames are concatenated into a single DataFrame.
+The two DataFrames are concatenated into a single DataFrame. Neither loader caches — each call re-reads the CSVs from disk, so a fresh export takes effect on the next **Run**.
+
+**Where `SOD VALUE` comes from** (the two sources derive it differently):
+
+| Source | CSV | Derivation |
+|---|---|---|
+| `UBS` | `UBS_Holdings.csv` | `VALUE - CHANGE IN VALUE` |
+| `401K` | `UBS 401K.csv` | the `Closing Balance` column |
+
+> **Do not use the 401K CSV's `Opening Balance` as the start-of-day basis.** That export's `Date Range` spans the year to date (e.g. `January 1, 2026 - August 19, 2026`), so `Opening Balance` is the **January 1** figure, not the prior close. Using it understated 401K PnL by ~12.5% until it was corrected. `Closing Balance` is the prior close and cross-checks against `Units × Fund Price` to within rounding.
+
+`Ticker Alias` and `Tag` are merged in from `Ticker-Aliases.csv` / `Ticker-Aliases-401K.csv`. **A symbol missing from those files gets a `NaN` alias**, which reaches `yf.Ticker(nan)` and logs a `failed to get price for nan` warning. That row keeps its SOD exposure but contributes **$0** to PnL, silently understating the total.
+
+If you see that warning, the fix is almost always to **add the missing symbol to the alias CSV** — not to assume the ticker is unpriceable. (`SPCX` hit exactly this after its IPO: Yahoo priced it fine, but the alias row was absent, so it contributed $0 until added.) To find the culprit, the warning says `nan` rather than the symbol, because the symbol is lost at the merge — list them with:
+
+```python
+df[df["Ticker Alias"].isna()][["DESCRIPTION", "SYMBOL", "SOD VALUE"]]
+```
 
 ### 9.2 Price Enrichment
 

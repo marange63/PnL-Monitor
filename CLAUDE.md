@@ -10,7 +10,8 @@ Tkinter desktop app that monitors intraday P&L across a UBS brokerage and UBS 40
 - **GitHub:** https://github.com/marange63/PnL-Monitor (branch `main`).
 
 ## Data Pipeline
-- `ubs_live_price_holdings()` + `ubs_401k_holdings()` return DataFrames with `DESCRIPTION`, `SYMBOL`, `SOD VALUE`, `Ticker Alias`, `Tag`, `Source`.
+- `ubs_live_price_holdings()` + `ubs_401k_holdings()` return DataFrames with `DESCRIPTION`, `SYMBOL`, `SOD VALUE`, `Ticker Alias`, `Tag`, `Source`. Neither caches — every call re-reads the CSVs from disk. `claudedev_shared.holdings_paths()` is the single source of truth for the two holdings CSV paths.
+- **`SOD VALUE` derivation differs by source:** UBS = `VALUE - CHANGE IN VALUE`; 401K = the `Closing Balance` column.
 - Prices via `yf.Ticker(t).fast_info` — use `last_price` and `regular_market_previous_close` (**not** `previous_close`, which includes after-hours).
 - `load_and_compute()` concatenates both sources, fetches prices in parallel (`ThreadPoolExecutor(max_workers=5)`, one retry with 0.5 s backoff, failed tickers yield `(None, None, None)`), then fills `Last Price`, `Last Close`, `% Move On Day`, `PnL`.
 - **Split auto-detect** (`_detect_split_ratio`): if `last_price / last_close < 0.35`, divide `last_close` by `round(1/ratio)`. Logs `detected N:1 split` INFO line — check the log before chasing "too good" prices.
@@ -90,6 +91,9 @@ Order and initial weights: **treemap (7) | scatter (9) | ticker bar (6) | tag ba
 - `RunLoop(...).run_once() / .toggle_auto()` — calls `on_result(RunResult(plot_df, etf_dd, custom_dd, intraday))` on the main thread.
 
 ## Gotchas
+- **Never map 401K `SOD VALUE` to the CSV's `Opening Balance`.** That export's `Date Range` is year-to-date (`January 1, 2026 - August 19, 2026`), so `Opening Balance` is the Jan 1 figure, not the prior close. It silently understated 401K PnL by ~12.5% (and growing through the year) until fixed to `Closing Balance` in `claudedev-shared/src/claudedev_shared/core.py`. Cross-check against `Units * Fund Price`. Pinned by `test_401k_sod_uses_closing_balance`.
+- `failed to get price for nan` means a symbol is **absent from `Ticker-Aliases*.csv`**, so the merge left a `NaN` alias that reached `yf.Ticker(nan)` (`nan.upper()` → `AttributeError`, caught, retried once after a wasted 0.5 s, then warned). The row keeps its SOD exposure but contributes `$0` PnL, and `df[Col.PNL].sum()` skips NaN so nothing errors — the position is just silently dropped from the total. **Fix by adding the alias row, and don't conclude the ticker is unpriceable** — the log says `nan`, not the symbol, so the symbol looks unidentifiable when it isn't. Find it with `df[df[Col.TICKER].isna()]`. `SPCX` hit this post-IPO.
+- When checking whether yfinance has a ticker, use `fast_info["last_price"]` (subscript), **not** `fast_info.get("last_price")` — `.get()` can return `None` for a ticker that subscripts fine, which reads as "no data" and sends you chasing the wrong bug. Cross-check with `.history(period="5d")` and `.info` before declaring a ticker dead.
 - `PCT_MOVE` is a **decimal**, not %×100. `PnL = SOD VALUE * PCT_MOVE`.
 - Every tkinter call from a worker thread must go through `root.after(0, ...)` — `RunLoop._worker`, `DrawdownTable._add_worker`, `PnLApp._refresh_custom_drawdowns` all rely on this.
 - `ScrollableBarChart`: `_canvas_widget.config(width=w, height=h_px)` triggers matplotlib's `<Configure>` (recreates `_tkphoto`). Do **not** unbind it. Always call `_canvas.draw()` explicitly — needed even when size is unchanged (e.g. sort toggle).
