@@ -199,3 +199,61 @@ def test_fetch_drawdown_returns_none_on_exception():
         yf_mock.Ticker.side_effect = KeyError("bogus")
         dd = data._fetch_drawdown("XLE")
     assert dd == {"Today": None, "6W": None, "ATH": None}
+
+
+# ---------- get_prices_batch ----------
+
+def _quote(sym, price, prev):
+    return {"symbol": sym, "regularMarketPrice": price, "regularMarketPreviousClose": prev}
+
+
+def test_prices_batch_dedupes_and_skips_nan_aliases():
+    req = MagicMock(return_value=[_quote("SPY", 101.0, 100.0), _quote("QQQ", 99.0, 100.0)])
+    with patch.object(data, "_quote_request", req):
+        out = data.get_prices_batch(["SPY", "QQQ", "SPY", float("nan")])
+    req.assert_called_once_with(["SPY", "QQQ"])
+    assert out["SPY"] == pytest.approx((101.0, 100.0, 0.01))
+    assert out["QQQ"] == pytest.approx((99.0, 100.0, -0.01))
+
+
+def test_prices_batch_chunks_requests():
+    tickers = [f"T{i}" for i in range(data.QUOTE_BATCH_SIZE + 1)]
+    req = MagicMock(side_effect=lambda syms: [_quote(s, 1.0, 1.0) for s in syms])
+    with patch.object(data, "_quote_request", req):
+        out = data.get_prices_batch(tickers)
+    assert req.call_count == 2
+    assert set(out) == set(tickers)
+
+
+def test_prices_batch_falls_back_for_missing_or_nan_close():
+    req = MagicMock(return_value=[_quote("SPY", 101.0, 100.0), _quote("QQQ", 99.0, None)])
+    single = MagicMock(return_value=(1.0, 2.0, -0.5))
+    with patch.object(data, "_quote_request", req), \
+         patch.object(data, "get_price_data", single):
+        out = data.get_prices_batch(["SPY", "QQQ", "IWM"])
+    assert sorted(c.args[0] for c in single.call_args_list) == ["IWM", "QQQ"]
+    assert out["IWM"] == (1.0, 2.0, -0.5)
+
+
+def test_prices_batch_falls_back_when_endpoint_breaks():
+    single = MagicMock(return_value=(1.0, 2.0, -0.5))
+    with patch.object(data, "_quote_request", MagicMock(side_effect=KeyError("quoteResponse"))), \
+         patch.object(data, "get_price_data", single):
+        out = data.get_prices_batch(["SPY"])
+    assert out == {"SPY": (1.0, 2.0, -0.5)}
+
+
+def test_prices_batch_propagates_rate_limit_without_fallback():
+    single = MagicMock()
+    with patch.object(data, "_quote_request", MagicMock(side_effect=data.YFRateLimitError())), \
+         patch.object(data, "get_price_data", single):
+        with pytest.raises(data.YFRateLimitError):
+            data.get_prices_batch(["SPY"])
+    single.assert_not_called()
+
+
+def test_prices_batch_applies_split_adjustment():
+    req = MagicMock(return_value=[_quote("NVDA", 20.0, 100.0)])  # 5:1 split
+    with patch.object(data, "_quote_request", req):
+        out = data.get_prices_batch(["NVDA"])
+    assert out["NVDA"] == pytest.approx((20.0, 20.0, 0.0))

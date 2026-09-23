@@ -14,11 +14,13 @@ Manual test (bypass the market-hours gate):
 import logging
 import os
 import sys
+import time as _time
 from datetime import datetime, time
 from zoneinfo import ZoneInfo
 
 import requests
 from claudedev_shared import holdings_paths
+from yfinance.exceptions import YFRateLimitError
 
 from data import load_and_compute
 from constants import Col
@@ -28,6 +30,9 @@ NTFY_URL = f"https://ntfy.sh/{NTFY_TOPIC}"
 ET = ZoneInfo("America/New_York")
 MARKET_OPEN = time(9, 30)
 MARKET_CLOSE = time(16, 30)
+# Backoff between attempts when Yahoo rate-limits us. Total ~3.5 min, well inside
+# the 15-min schedule, so a retrying run never overlaps the next one.
+RATE_LIMIT_BACKOFF_SECS = (30, 60, 120)
 
 log = logging.getLogger("notify_pnl")
 
@@ -56,6 +61,21 @@ def holdings_mtime() -> datetime | None:
         if newest is None or mtime > newest:
             newest = mtime
     return newest
+
+
+def load_with_retry():
+    """load_and_compute(), retrying on YFRateLimitError with RATE_LIMIT_BACKOFF_SECS.
+
+    Yahoo 429s are usually transient, so a single one shouldn't page as a failure.
+    The last attempt's YFRateLimitError propagates to main()'s failure alert.
+    """
+    for delay in RATE_LIMIT_BACKOFF_SECS:
+        try:
+            return load_and_compute()
+        except YFRateLimitError:
+            log.warning("Yahoo rate-limited; retrying in %ds", delay)
+            _time.sleep(delay)
+    return load_and_compute()
 
 
 def _post(body: str, title: str, tags: str, priority: str = "default") -> None:
@@ -100,7 +120,7 @@ def main() -> int:
         return 0
     try:
         holdings_at = holdings_mtime()
-        df = load_and_compute()
+        df = load_with_retry()
         total = float(df[Col.PNL].sum())
         send_notification(total, now, holdings_at)
     except Exception as exc:

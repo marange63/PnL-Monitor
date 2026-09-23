@@ -12,8 +12,10 @@ Tkinter desktop app that monitors intraday P&L across a UBS brokerage and UBS 40
 ## Data Pipeline
 - `ubs_live_price_holdings()` + `ubs_401k_holdings()` return DataFrames with `DESCRIPTION`, `SYMBOL`, `SOD VALUE`, `Ticker Alias`, `Tag`, `Source`. Neither caches — every call re-reads the CSVs from disk. `claudedev_shared.holdings_paths()` is the single source of truth for the two holdings CSV paths.
 - **`SOD VALUE` derivation differs by source:** UBS = `VALUE - CHANGE IN VALUE`; 401K = the `Closing Balance` column.
-- Prices via `yf.Ticker(t).fast_info` — use `last_price` and `regular_market_previous_close` (**not** `previous_close`, which includes after-hours).
-- `load_and_compute()` concatenates both sources, fetches prices in parallel (`ThreadPoolExecutor(max_workers=5)`, one retry with 0.5 s backoff, failed tickers yield `(None, None, None)`), then fills `Last Price`, `Last Close`, `% Move On Day`, `PnL`.
+- Holdings prices via `get_prices_batch()`: one Yahoo `v7/finance/quote` request per 50 symbols (`_quote_request`, through yfinance's `YfData` so it shares its cookie/crumb), using `regularMarketPrice` + `regularMarketPreviousClose`. This replaced ~2 chart requests **per ticker**, which got Yahoo to 429 the notifier all day while the GUI ran. Tickers missing from the response fall back to `get_price_data()`, and so does everything if the endpoint breaks. `YFRateLimitError` propagates with **no** fallback.
+- Per-ticker fallback / drawdowns / intraday use `yf.Ticker(t).fast_info`: `last_price` and `regular_market_previous_close` (**not** `previous_close`, which includes after-hours).
+- `load_and_compute()` concatenates both sources, batch-prices them (per-ticker fallback: `ThreadPoolExecutor(max_workers=5)`, one retry with 0.5 s backoff, failures yield `(None, None, None)`), then fills `Last Price`, `Last Close`, `% Move On Day`, `PnL`.
+- `YFRateLimitError` subclasses `YFException → Exception`, **not** anything in `_PRICE_FETCH_ERRORS`, so it aborts the whole run. The GUI swallows it in `RunLoop._worker` (status bar only; stderr is gone under `pythonw`) and retries 60 s later. `notify_pnl.load_with_retry` backs off 30/60/120 s before alerting.
 - **Split auto-detect** (`_detect_split_ratio`): if `last_price / last_close < 0.35`, divide `last_close` by `round(1/ratio)`. Logs `detected N:1 split` INFO line — check the log before chasing "too good" prices.
 
 ## DataFrame Schema
@@ -38,7 +40,7 @@ Reference columns through `constants.Col` — never string literals.
 | `main.py` | Entry point: logging, theme, `PnLApp` |
 | `app.py` | `PnLApp` — wires control strip, panes, and `RunLoop`; owns toggle vars; persists custom tickers to `custom_tickers.json` (`MAX_CUSTOM_TICKERS = 4`) |
 | `run_loop.py` | `RunLoop` — worker thread + auto-update timer + countdown tick; calls `on_result(RunResult)` on main thread |
-| `data.py` | `load_and_compute`, `get_price_data`, `validate_ticker`, `get_default_drawdowns`, `get_drawdowns`, `get_intraday_prices`, `HighCache`; `DEFAULT_TICKERS`, `INTRADAY_TICKERS` |
+| `data.py` | `load_and_compute`, `get_prices_batch`, `get_price_data`, `validate_ticker`, `get_default_drawdowns`, `get_drawdowns`, `get_intraday_prices`, `HighCache`; `DEFAULT_TICKERS`, `INTRADAY_TICKERS` |
 | `charts.py` | `draw_scatter`/`draw_bar`/`draw_treemap` + their `build_*_df` companions; `dollar_fmt`, `pct_fmt` |
 | `constants.py` | `Col`, color palette, button colors, sizing/timing constants |
 | `drawdown_table.py` | `DrawdownTable` — ticker/6W/ATH table (+ optional Today column via `show_today`); editable variant adds × delete labels, Add row, async validation, height-sync to sibling |
@@ -79,6 +81,7 @@ Order and initial weights: **treemap (7) | scatter (9) | ticker bar (6) | tag ba
 | Sort A–Z | — | — | order | order |
 
 ## Key Contracts
+- `get_prices_batch(tickers) -> {ticker: (last_price, last_close, pct_move)}` — de-dupes, skips NaN aliases, split-adjusts.
 - `load_and_compute(status_cb=None) -> DataFrame` — fills price/PnL columns; `status_cb(stage)` drives the status bar.
 - `get_price_data(ticker) -> (last_price, last_close, pct_move)` — `None`s on failure; transparently split-adjusts `last_close`.
 - `get_drawdowns(tickers) / get_default_drawdowns() -> {ticker: {"Today": dec|None, "6W": dec|None, "ATH": dec|None}}`.
@@ -92,7 +95,7 @@ Order and initial weights: **treemap (7) | scatter (9) | ticker bar (6) | tag ba
 
 ## Gotchas
 - **Never map 401K `SOD VALUE` to the CSV's `Opening Balance`.** That export's `Date Range` is year-to-date (`January 1, 2026 - August 19, 2026`), so `Opening Balance` is the Jan 1 figure, not the prior close. It silently understated 401K PnL by ~12.5% (and growing through the year) until fixed to `Closing Balance` in `claudedev-shared/src/claudedev_shared/core.py`. Cross-check against `Units * Fund Price`. Pinned by `test_401k_sod_uses_closing_balance`.
-- `failed to get price for nan` means a symbol is **absent from `Ticker-Aliases*.csv`**, so the merge left a `NaN` alias that reached `yf.Ticker(nan)` (`nan.upper()` → `AttributeError`, caught, retried once after a wasted 0.5 s, then warned). The row keeps its SOD exposure but contributes `$0` PnL, and `df[Col.PNL].sum()` skips NaN so nothing errors — the position is just silently dropped from the total. **Fix by adding the alias row, and don't conclude the ticker is unpriceable** — the log says `nan`, not the symbol, so the symbol looks unidentifiable when it isn't. Find it with `df[df[Col.TICKER].isna()]`. `SPCX` hit this post-IPO.
+- `no Ticker Alias for <SYMBOL>` (formerly `failed to get price for nan`) means a symbol is **absent from `Ticker-Aliases*.csv`**, so the merge left a `NaN` alias. The row keeps its SOD exposure but contributes `$0` PnL, and `df[Col.PNL].sum()` skips NaN so nothing errors — the position is just silently dropped from the total. **Fix by adding the alias row, and don't conclude the ticker is unpriceable.** Find it with `df[df[Col.TICKER].isna()]`. `SPCX` hit this post-IPO.
 - When checking whether yfinance has a ticker, use `fast_info["last_price"]` (subscript), **not** `fast_info.get("last_price")` — `.get()` can return `None` for a ticker that subscripts fine, which reads as "no data" and sends you chasing the wrong bug. Cross-check with `.history(period="5d")` and `.info` before declaring a ticker dead.
 - `PCT_MOVE` is a **decimal**, not %×100. `PnL = SOD VALUE * PCT_MOVE`.
 - Every tkinter call from a worker thread must go through `root.after(0, ...)` — `RunLoop._worker`, `DrawdownTable._add_worker`, `PnLApp._refresh_custom_drawdowns` all rely on this.
@@ -105,7 +108,8 @@ Order and initial weights: **treemap (7) | scatter (9) | ticker bar (6) | tag ba
 
 ## Tests
 `pytest tests/ -q`. Coverage:
-- `tests/test_data.py` — `_detect_split_ratio`, `HighCache`, `validate_ticker`, `_fetch_drawdown` (yfinance mocked).
+- `tests/test_data.py` — `_detect_split_ratio`, `HighCache`, `validate_ticker`, `_fetch_drawdown`, `get_prices_batch` (yfinance / `_quote_request` mocked).
+- `tests/test_notify_pnl.py` — `load_with_retry` backoff on `YFRateLimitError`.
 - `tests/test_charts.py` — `build_bar_df`, `build_grouped_scatter_df`, `build_tag_bar_df` against `sample_positions` in `conftest.py`.
 
 ## Git

@@ -112,6 +112,7 @@ The application window opens in the Sun Valley light theme. No data is loaded on
 - **Message:** body `Total PnL: +$1,234.56` followed by a `holdings 09:26` line, title `PnL @ 1:45 PM ET` (up/down emoji tag by sign).
 - **Self-gating:** the script only sends on **weekdays, 09:30–16:30 America/New_York**. Runs outside that window exit silently, so stray or DST-shifted triggers are harmless.
 - **Fresh holdings every run:** neither `load_and_compute()` nor the `claudedev_shared` loaders cache, and Task Scheduler starts a new process each time, so re-exporting `UBS_Holdings.csv` or `UBS 401K.csv` is picked up by the next run with no restart. The `holdings HH:MM` line reports the newer of the two files' modification times, so a forgotten re-export is visible rather than silent.
+- **Rate-limit retry:** if Yahoo answers `429 Too Many Requests` (`YFRateLimitError`), the run waits 30 s, 60 s, then 120 s between attempts (`RATE_LIMIT_BACKOFF_SECS`, ~3.5 min total, well inside the 15-min schedule) before giving up. Only a run that is still rate-limited after the last attempt sends a failure alert. The GUI shares the machine's IP and therefore Yahoo's rate budget, so a GUI on Auto Update makes 429s more likely.
 - **Failure alerts:** if the holdings load or the price fetch raises (malformed or half-written CSV, missing file), the script posts a **`PnL notifier failed`** notification at high priority carrying the exception type and message, then exits `1`. A network failure during that alert is logged only, so it can never mask the original error.
 - **Manual test:** `python notify_pnl.py --force` bypasses the market-hours gate and sends immediately.
 
@@ -350,6 +351,8 @@ Contains two classes:
 
 Two public functions:
 
+**`get_prices_batch(tickers)`** — Prices many tickers with one Yahoo `v7/finance/quote` request per 50 symbols (`QUOTE_BATCH_SIZE`). De-duplicates and skips `NaN` aliases. Tickers the batch doesn't return fall back to `get_price_data`; a `YFRateLimitError` propagates without fallback. Returns `{ticker: (last_price, last_close, pct_move)}`.
+
 **`get_price_data(ticker)`** — Fetches the current price, previous close, and percentage move for a single ticker via `yfinance`. Retries once with a 0.5-second delay on failure. Returns `(last_price, last_close, pct_move)` or `(None, None, None)`.
 
 **`load_and_compute(status_cb=None)`** — The full data pipeline:
@@ -424,9 +427,9 @@ The two DataFrames are concatenated into a single DataFrame. Neither loader cach
 
 > **Do not use the 401K CSV's `Opening Balance` as the start-of-day basis.** That export's `Date Range` spans the year to date (e.g. `January 1, 2026 - August 19, 2026`), so `Opening Balance` is the **January 1** figure, not the prior close. Using it understated 401K PnL by ~12.5% until it was corrected. `Closing Balance` is the prior close and cross-checks against `Units × Fund Price` to within rounding.
 
-`Ticker Alias` and `Tag` are merged in from `Ticker-Aliases.csv` / `Ticker-Aliases-401K.csv`. **A symbol missing from those files gets a `NaN` alias**, which reaches `yf.Ticker(nan)` and logs a `failed to get price for nan` warning. That row keeps its SOD exposure but contributes **$0** to PnL, silently understating the total.
+`Ticker Alias` and `Tag` are merged in from `Ticker-Aliases.csv` / `Ticker-Aliases-401K.csv`. **A symbol missing from those files gets a `NaN` alias**, and `load_and_compute()` logs `no Ticker Alias for <SYMBOL> -- add to Ticker-Aliases*.csv; PnL excluded`. That row keeps its SOD exposure but contributes **$0** to PnL, silently understating the total.
 
-If you see that warning, the fix is almost always to **add the missing symbol to the alias CSV** — not to assume the ticker is unpriceable. (`SPCX` hit exactly this after its IPO: Yahoo priced it fine, but the alias row was absent, so it contributed $0 until added.) To find the culprit, the warning says `nan` rather than the symbol, because the symbol is lost at the merge — list them with:
+If you see that warning, the fix is almost always to **add the missing symbol to the alias CSV** — not to assume the ticker is unpriceable. (`SPCX` hit exactly this after its IPO: Yahoo priced it fine, but the alias row was absent, so it contributed $0 until added.) The warning names the brokerage `SYMBOL`. (Before the batch-quote change it logged `failed to get price for nan` instead, with no symbol.) To list them yourself:
 
 ```python
 df[df["Ticker Alias"].isna()][["DESCRIPTION", "SYMBOL", "SOD VALUE"]]
@@ -434,17 +437,9 @@ df[df["Ticker Alias"].isna()][["DESCRIPTION", "SYMBOL", "SOD VALUE"]]
 
 ### 9.2 Price Enrichment
 
-For each unique `Ticker Alias` in the combined DataFrame, `get_price_data()` calls the Yahoo Finance API via `yfinance`:
+`get_prices_batch()` prices every unique `Ticker Alias` with Yahoo's multi-symbol quote endpoint, taking `regularMarketPrice` and `regularMarketPreviousClose` (the regular-session close, not the after-hours-inclusive `previousClose`). That is 2 requests for ~60 tickers, where the per-ticker path took ~2 requests **per ticker**. The reduction keeps the GUI's 60 s loop and the scheduled notifier under Yahoo's rate limit.
 
-```python
-data = yf.Ticker(ticker).fast_info
-last_price = data.last_price
-last_close = data.regular_market_previous_close
-```
-
-**Important:** The code uses `regular_market_previous_close` (not `previous_close`), because `previous_close` includes after-hours trading and would produce incorrect intraday P&L calculations.
-
-Price fetches run concurrently across 5 threads. Each fetch retries once on failure with a 0.5-second delay, to handle intermittent Yahoo Finance rate-limiting.
+Tickers missing from the batch response fall back to `get_price_data()`, which uses `yf.Ticker(ticker).fast_info` (`last_price`, `regular_market_previous_close`, then a 1-minute-history fallback) across 5 threads, retrying once after 0.5 s. A `YFRateLimitError` is not retried here: it aborts the run (the GUI shows `Error: ...` in the status bar and tries again on the next cycle; the notifier backs off and retries).
 
 ### 9.3 PnL Computation
 
@@ -529,7 +524,7 @@ The application uses a **single-threaded GUI with background workers** pattern:
 - **Main thread:** Runs the tkinter event loop. All GUI updates must happen on this thread.
 - **Worker threads:** `_run_worker()` and `_auto_worker()` run in daemon threads via `threading.Thread(daemon=True)`. They perform network I/O (Yahoo Finance) and data computation off the main thread.
 - **Thread safety:** All GUI updates from worker threads are dispatched to the main thread via `root.after(0, callback)`. This is critical — calling tkinter methods directly from a background thread causes crashes.
-- **Concurrency within workers:** `get_price_data()` is called via `ThreadPoolExecutor(max_workers=5)`, meaning up to 5 Yahoo Finance requests run in parallel within a single worker thread.
+- **Concurrency within workers:** holdings prices come from one batched quote request per 50 symbols. Only the per-ticker fallback (`get_price_data()`) uses `ThreadPoolExecutor(max_workers=5)`.
 
 ### Auto-update cycle
 
@@ -622,7 +617,8 @@ All tunable values are in `constants.py`. To change the auto-update interval, ba
 2. **`regular_market_previous_close` vs `previous_close`.** The code deliberately uses `regular_market_previous_close` from yfinance. The `previous_close` field includes after-hours price changes and would produce incorrect intraday P&L relative to the prior regular session close.
 
 3. **Yahoo Finance intermittent failures.** Yahoo Finance's API occasionally returns empty responses under load. The application mitigates this by:
-   - Limiting concurrent requests to 5 (via `ThreadPoolExecutor(max_workers=5)`)
+   - Pricing holdings with a single batched quote request instead of per-ticker calls
+   - Limiting concurrent per-ticker fallback requests to 5 (via `ThreadPoolExecutor(max_workers=5)`)
    - Retrying once with a 0.5-second delay on failure
    - Gracefully handling failures with `(None, None, None)` return values
 
@@ -644,7 +640,7 @@ All tunable values are in `constants.py`. To change the auto-update interval, ba
 
 ### "Warning: failed to get price for TICKER: ..."
 
-Yahoo Finance returned an error for that ticker. If this affects many tickers, it is likely rate-limiting. The retry mechanism handles most cases. If persistent:
+Yahoo Finance returned an error for that ticker in the per-ticker fallback path. If this affects many tickers, it is likely rate-limiting. The retry mechanism handles most cases. If persistent:
 - Check your internet connection
 - Verify the ticker is valid on Yahoo Finance
 - Try reducing `max_workers` in `data.py` if running on a slow connection

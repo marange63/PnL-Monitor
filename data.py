@@ -5,6 +5,8 @@ from typing import Callable, Iterable
 
 import pandas as pd
 import yfinance as yf
+from yfinance.data import YfData
+from yfinance.exceptions import YFRateLimitError
 from claudedev_shared import ubs_live_price_holdings, ubs_401k_holdings
 
 from constants import Col
@@ -68,19 +70,75 @@ def get_price_data(ticker: str) -> PriceTuple:
             if last_close is None:
                 log.warning("no previous close available for %s", ticker)
                 return None, None, None
-            split_ratio = _detect_split_ratio(last_price, last_close)
-            if split_ratio > 1:
-                last_close = last_close / split_ratio
-                log.info("detected %d:1 split for %s, adjusted close to $%.2f",
-                         split_ratio, ticker, last_close)
-            pct_move = (last_price - last_close) / last_close
-            return last_price, last_close, pct_move
+            return _price_tuple(ticker, last_price, last_close)
         except _PRICE_FETCH_ERRORS as e:
             if attempt == 0:
                 time.sleep(0.5)
             else:
                 log.warning("failed to get price for %s: %s", ticker, e)
     return None, None, None
+
+
+QUOTE_URL = "https://query1.finance.yahoo.com/v7/finance/quote"
+QUOTE_BATCH_SIZE = 50
+
+
+def _quote_request(symbols: list[str]) -> list[dict]:
+    """One v7/quote request for many symbols. Unknown symbols are simply absent.
+
+    Raises YFRateLimitError on HTTP 429 -- callers let that propagate rather than
+    falling back to per-ticker fetches, which would only add load.
+    """
+    j = YfData().get_raw_json(QUOTE_URL, params={
+        "symbols": ",".join(symbols),
+        "fields": "regularMarketPrice,regularMarketPreviousClose",
+        "formatted": "false",
+    })
+    return j["quoteResponse"]["result"] or []
+
+
+def _price_tuple(ticker: str, last_price, last_close) -> PriceTuple | None:
+    """Split-adjust and compute % move; None if either price is missing."""
+    if last_price is None or last_close is None or pd.isna(last_price) or pd.isna(last_close):
+        return None
+    last_price, last_close = float(last_price), float(last_close)
+    split_ratio = _detect_split_ratio(last_price, last_close)
+    if split_ratio > 1:
+        last_close = last_close / split_ratio
+        log.info("detected %d:1 split for %s, adjusted close to $%.2f",
+                 split_ratio, ticker, last_close)
+    return last_price, last_close, (last_price - last_close) / last_close
+
+
+def get_prices_batch(tickers: Iterable[str]) -> dict[str, PriceTuple]:
+    """Price many tickers with one v7/quote request per QUOTE_BATCH_SIZE symbols.
+
+    Replaces ~2 chart requests per ticker (fast_info's 1y history plus the 1m
+    previous-close fallback) with a couple of requests total, which keeps the GUI's
+    60 s loop and the scheduled notifier under Yahoo's rate limit. Tickers the batch
+    doesn't price fall back to get_price_data(); if the batch endpoint itself breaks
+    (anything but a rate limit), everything falls back.
+    """
+    unique = list(dict.fromkeys(t for t in tickers if isinstance(t, str) and t))
+    results: dict[str, PriceTuple] = {}
+    try:
+        for i in range(0, len(unique), QUOTE_BATCH_SIZE):
+            for q in _quote_request(unique[i:i + QUOTE_BATCH_SIZE]):
+                sym = q.get("symbol")
+                prices = _price_tuple(sym, q.get("regularMarketPrice"),
+                                      q.get("regularMarketPreviousClose"))
+                if sym in unique and prices is not None:
+                    results[sym] = prices
+    except YFRateLimitError:
+        raise
+    except Exception as e:
+        log.warning("batch quote failed, falling back to per-ticker: %s", e)
+    missing = [t for t in unique if t not in results]
+    if missing:
+        log.info("batch quote missed %s; fetching individually", ", ".join(missing))
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            results.update(zip(missing, executor.map(get_price_data, missing)))
+    return results
 
 
 DEFAULT_TICKERS = ("SPY", "QQQ", "IWM", "EEM")
@@ -232,11 +290,13 @@ def load_and_compute(status_cb: Callable[[str], None] | None = None) -> pd.DataF
 
     if status_cb:
         status_cb("Getting prices...")
-    tickers = df[Col.TICKER].tolist()
-    with ThreadPoolExecutor(max_workers=5) as executor:
-        results = dict(zip(tickers, executor.map(get_price_data, tickers)))
+    unaliased = df[df[Col.TICKER].isna()]
+    if not unaliased.empty:
+        log.warning("no Ticker Alias for %s -- add to Ticker-Aliases*.csv; PnL excluded",
+                    ", ".join(unaliased[Col.SYMBOL].astype(str)))
+    results = get_prices_batch(df[Col.TICKER])
     df[[Col.LAST_PRICE, Col.LAST_CLOSE, Col.PCT_MOVE]] = (
-        df[Col.TICKER].map(results).apply(pd.Series)
+        df[Col.TICKER].map(lambda t: results.get(t, (None, None, None))).apply(pd.Series)
     )
 
     if status_cb:
