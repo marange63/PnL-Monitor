@@ -1,3 +1,8 @@
+# Create with:  conda env create -f environment.yml
+#
+# Paths in the pip section are resolved relative to this file's directory, so
+# run the command from the project folder.
+
 name: PnL-Monitor
 channels:
   - conda-forge
@@ -11,5 +16,7 @@ dependencies:
     - matplotlib>=3.10.0,<4.0.0
     - squarify>=0.4.3,<1.0.0
     - sv-ttk>=2.6.0,<3.0.0
-    - claudedev_shared
-    - pytest>=8.0.0,<9.0.0
+    # Local sibling library, not published to PyPI. Installed editable so the
+    # env tracks edits in libs/claudedev-shared instead of pinning a copy.
+    - -e ../libs/claudedev-shared
+    - pytest>=8.0.0,<10.0.0
